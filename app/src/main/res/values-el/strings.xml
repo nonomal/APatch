@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">APatch</string>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="patch_warnning">Η εγκατάσταση ενέχει κινδύνους. Βεβαιωθείτε ότι έχετε δημιουργήσει αντίγραφα ασφαλείας των δεδομένων σας.</string>
     <string name="kernel_patch">KernelPatch</string>
     <string name="android_patch">AndroidPatch</string>
@@ -15,7 +14,7 @@
     <string name="reboot_recovery">Επανεκκίνηση στο Recovery</string>
     <string name="reboot_download">Επανεκκίνηση για λήψη</string>
     <string name="about">Σχετικά με το</string>
-    <string name="home_learn_apatch">Μάθετε το AndroidPatch</string>
+    <string name="home_learn_apatch">Μάθετε το APatch</string>
     <string name="home_click_to_learn_apatch">Μάθετε για τα χαρακτηριστικά του AndroidPatch και πώς να το χρησιμοποιείτε</string>
     <string name="settings_app_language">Γλώσσα</string>
     <string name="patch">Επιδιόρθωση</string>
@@ -25,16 +24,15 @@
     <string name="apm_update">Ενημέρωση</string>
     <string name="home_need_update">Νέα έκδοση διαθέσιμη</string>
     <string name="home_working">Εργασία</string>
-    <string name="patch_title">Patch</string>
-    <string name="kpatch_version">Έκδοση: %d.%d.%d</string>
+    <string name="patch_title">Επιδιόρθωση</string>
+    <string name="kpatch_version">Έκδοση: %s</string>
     <string name="kpm_unload_confirm">Ξεφορτώστε την ενότητα \"%s\"?</string>
-    <string name="apatch_version">Έκδοση:
-\n%s</string>
+    <string name="apatch_version">Έκδοση: %s</string>
     <string name="home_fingerprint">Δακτυλικό αποτύπωμα</string>
     <string name="su_title">Σούπερ χρήστης</string>
     <string name="apm_downloading">Λήψη της μονάδας \"%s\"…</string>
     <string name="su_hide_system_apps">Απόκρυψη εφαρμογών συστήματος</string>
-    <string name="home_selinux_status_disabled">Off</string>
+    <string name="home_selinux_status_disabled">Ανενεργό</string>
     <string name="kpm_author">Συγγραφέας</string>
     <string name="home_click_to_install">Κάντε κλικ για να εγκαταστήσετε</string>
     <string name="home_ap_cando_install">Εγκαταστήστε το</string>
@@ -43,11 +41,11 @@
     <string name="home_selinux_status">Κατάσταση SELinux</string>
     <string name="send_log">Αποστολή αρχείο καταγραφής</string>
     <string name="safe_mode">Ασφαλής λειτουργία</string>
-    <string name="about_source_code">Δείτε τον πηγαίο κώδικα στο %1$s<br/>Ενταχθείτε στο κανάλι μας %2$s</string>
+    <string name="about_source_code">&lt;p&gt;Δείτε τον πηγαίο κώδικα στο %1$s&lt;p/&gt;Ενταχθείτε στο κανάλι μας %2$s&lt;p/&gt;Ενταχθείτε στο γκρουπ %3$s μας</string>
     <string name="apm_uninstall_confirm">Απεγκαταστήστε την ενότητα \"%s\"?</string>
     <string name="apm_failed_to_disable">Δεν ήταν δυνατή η απενεργοποίηση της μονάδας \"%s\"</string>
     <string name="apm_empty">Δεν υπάρχει εγκατεστημένη μονάδα</string>
-    <string name="apm_uninstall">Απεγκατάσταση του</string>
+    <string name="apm_remove">Απεγκατάσταση του</string>
     <string name="apm_desc">Περιγραφή</string>
     <string name="apm_reboot_to_apply">Επανεκκίνηση για να τεθεί σε ισχύ</string>
     <string name="apm_changelog">Ημερολόγιο αλλαγών</string>
@@ -57,15 +55,14 @@
     <string name="apm_start_downloading">Έναρξη λήψης %s</string>
     <string name="super_key">Υπερ κλειδί</string>
     <string name="clear_super_key">Καθαρό κλειδί</string>
-    <string name="home_patch_set_key_title">Ρυθμίστε το σούπερ κλειδί</string>
+    <string name="patch_set_superkey">Ρυθμίστε το σούπερ κλειδί</string>
     <string name="home_patch_set_key_desc">Μόνο διαπιστευτήρια για το KernelPatch</string>
     <string name="home_patch_next_step">Επόμενο βήμα</string>
     <string name="home_not_installed">Δεν έχει εγκατασταθεί</string>
     <string name="home_install_unknown">Άγνωστος</string>
     <string name="home_installing">Εγκατάσταση του</string>
-    <string name="apatch_version_update">Έκδοση:
-\n%s -&gt; %s</string>
-    <string name="home_su_path">su: %s</string>
+    <string name="apatch_version_update">Έκδοση: %s -&gt; %s</string>
+    <string name="home_su_path">Εκτέλεση su</string>
     <string name="home_auth_key_desc">Έναρξη μετά την πιστοποίηση</string>
     <string name="home_ap_cando_update">Ενημέρωση</string>
     <string name="home_kernel">Πυρήνας</string>
@@ -87,13 +84,18 @@
     <string name="apm_version">Έκδοση</string>
     <string name="apm_author">Συγγραφέας</string>
     <string name="home_ap_cando_uninstall">κατάργηση εγκατάστασης</string>
-    <string name="home_apatch_version">APatch: %s</string>
+    <string name="home_apatch_version">έκδοση APatch</string>
     <string name="kpm_kp_not_installed">Το KernelPatch δεν έχει εγκατασταθεί</string>
     <string name="kpm_load_toast_succ">Φορτώστε επιτυχώς</string>
     <string name="kpm_apm_empty">Δεν έχει φορτωθεί καμία ενότητα</string>
     <string name="kpm_license">Άδεια</string>
     <string name="su_selinux_via_hook">παράκαμψη μέσω γάντζου</string>
-    <string name="su_pkg_excluded_setting_summary">για τις ενότητες</string>
     <string name="su_show_system_apps">Εμφάνιση εφαρμογών συστήματος</string>
     <string name="apm_uninstall_success">%s απεγκατεστημένο</string>
+    <string name="success">Επιτυχία</string>
+    <string name="failure">Αποτυχία</string>
+    <string name="settings_clear_super_key_dialog">Θέλετε πραγματικά να προχωρήσετε?</string>
+    <string name="settings_check_update">Έλεγχος ενημέρωσης</string>
+    <string name="settings_check_update_summary">Αυτόματος έλεγχος για ενημερώσεις κατά το άνοιγμα της εφαρμογής</string>
+    <string name="save_log">Αποθήκευση αρχείων καταγραφής</string>
 </resources>

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="kpatch_version">Verzió: %s</string>
     <string name="home_apatch_version">APatch: %s</string>
@@ -49,7 +48,7 @@
     <string name="su_show_system_apps">Rendszeralkalmazások megjelenítése</string>
     <string name="su_hide_system_apps">Rendszeralkalmazások elrejtése</string>
     <string name="su_refresh">Frissítés</string>
-    <string name="apm_uninstall">Eltávolítás</string>
+    <string name="apm_remove">Eltávolítás</string>
     <string name="apm_install">Telepítés</string>
     <string name="apm_reboot_to_apply">Újraindítsa a hatás eléréséhez</string>
     <string name="apm_changelog">Változásnapló</string>
@@ -70,7 +69,7 @@
     <string name="safe_mode">Biztonságos mód</string>
     <string name="super_key">SzuperKulcs</string>
     <string name="clear_super_key">SzuperKulcs tisztítása</string>
-    <string name="home_patch_set_key_title">SzuperKulcs beállítása</string>
+    <string name="patch_set_superkey">SzuperKulcs beállítása</string>
     <string name="home_patch_set_key_desc">Kizárólag a KernelPatch hitelesítéséhez</string>
     <string name="kpatch_version_update">Verzió: %s -&gt; %s</string>
     <string name="kpatch_shadow_path_title">kpatch</string>

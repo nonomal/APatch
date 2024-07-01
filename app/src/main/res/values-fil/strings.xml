@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="android_patch">AndroidPatch</string>
     <string name="patch_warnning">Ang instalasyon na ito ay pwede ikaka-sira ng inyong kagamitan, tiyakin muna kung ang iyong data ay naka-backup.</string>
@@ -15,7 +14,7 @@
     <string name="reboot_userspace">Soft Reboot</string>
     <string name="home_learn_apatch">Alamin ang AndroidPatch</string>
     <string name="home_click_to_install">I-click para mag install</string>
-    <string name="home_patch_set_key_title">I-set ang SuperKey</string>
+    <string name="patch_set_superkey">I-set ang SuperKey</string>
     <string name="home_working">Gumagana</string>
     <string name="home_not_installed">Hindi naka-installed</string>
     <string name="home_need_update">May update</string>
@@ -50,7 +49,7 @@
     <string name="home_selinux_status_disabled">Hindi pinagana</string>
     <string name="kpm_license">Lisensiya</string>
     <string name="apm_install">I-install</string>
-    <string name="apm_uninstall">I-uninstall</string>
+    <string name="apm_remove">I-uninstall</string>
     <string name="apm_uninstall_confirm">Sigurado ka bang gusto mong i-uninstall ang module %s?</string>
     <string name="su_pkg_excluded_setting_title">I-exclude</string>
     <string name="su_pkg_excluded_setting_summary">para sa mga modules</string>
@@ -77,4 +76,5 @@
     <string name="apm_start_downloading">Simulan ang pag-download ng: %s</string>
     <string name="apm_downloading">Ini-download ang module: %s</string>
     <string name="apm_new_version_available">Bagong bersyon: %s ay available, i-click para i-upgrade</string>
+    <string name="home">Tahanan</string>
 </resources>

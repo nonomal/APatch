@@ -1,9 +1,10 @@
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
-import org.jetbrains.kotlin.de.undercouch.gradle.tasks.download.Download
+import java.net.URI
 
 plugins {
     alias(libs.plugins.agp.app)
     alias(libs.plugins.kotlin)
+    alias(libs.plugins.kotlin.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.lsplugin.apksign)
     alias(libs.plugins.lsplugin.resopt)
@@ -29,14 +30,20 @@ android {
             isDebuggable = true
             isMinifyEnabled = false
             isShrinkResources = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = false
             multiDexEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
@@ -46,18 +53,26 @@ android {
         aidl = true
         buildConfig = true
         compose = true
+        prefab = true
     }
 
     defaultConfig {
         buildConfigField("String", "buildKPV", "\"$kernelPatchVersion\"")
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(JavaVersion.VERSION_22.majorVersion)
+        }
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
+    kotlin {
+        jvmToolchain(JavaVersion.VERSION_22.majorVersion.toInt())
+    }
+
+    composeCompiler {
+        enableIntrinsicRemember = true
+        enableNonSkippingGroupOptimization = true
     }
 
     packaging {
@@ -67,6 +82,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/**.version"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             excludes += "okhttp3/**"
             excludes += "kotlin/**"
             excludes += "/org/bouncycastle/**"
@@ -74,6 +90,12 @@ android {
             excludes += "**.properties"
             excludes += "**.bin"
             excludes += "kotlin-tooling-metadata.json"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
         }
     }
 
@@ -97,39 +119,76 @@ android {
     }
 }
 
-tasks.register<Download>("downloadKpimg") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kpimg-android")
-    dest(file("${project.projectDir}/src/main/assets/kpimg"))
-    onlyIfNewer(true)
-    overwrite(true)
+fun registerDownloadTask(
+    taskName: String, srcUrl: String, destPath: String, project: Project
+) {
+    project.tasks.register(taskName) {
+        val destFile = File(destPath)
+
+        doLast {
+            if (!destFile.exists() || isFileUpdated(srcUrl, destFile)) {
+                println(" - Downloading $srcUrl to ${destFile.absolutePath}")
+                downloadFile(srcUrl, destFile)
+                println(" - Download completed.")
+            } else {
+                println(" - File is up-to-date, skipping download.")
+            }
+        }
+    }
 }
 
-tasks.register<Download>("downloadKpatch") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kpatch-android")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libkpatch.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+fun isFileUpdated(url: String, localFile: File): Boolean {
+    val connection = URI.create(url).toURL().openConnection()
+    val remoteLastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
+    return remoteLastModified > localFile.lastModified()
 }
 
-tasks.register<Download>("downloadKptools") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kptools-android")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libkptools.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+fun downloadFile(url: String, destFile: File) {
+    URI.create(url).toURL().openStream().use { input ->
+        destFile.outputStream().use { output ->
+            input.copyTo(output)
+        }
+    }
 }
 
-tasks.register<Download>("downloadApjni") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/libapjni.so")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libapjni.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+registerDownloadTask(
+    taskName = "downloadKpimg",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
+    destPath = "${project.projectDir}/src/main/assets/kpimg",
+    project = project
+)
+
+registerDownloadTask(
+    taskName = "downloadKptools",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kptools-android",
+    destPath = "${project.projectDir}/libs/arm64-v8a/libkptools.so",
+    project = project
+)
+
+// Compat kp version less than 0.10.7
+// TODO: Remove in future
+registerDownloadTask(
+    taskName = "downloadCompatKpatch",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/0.10.7/kpatch-android",
+    destPath = "${project.projectDir}/libs/arm64-v8a/libkpatch.so",
+    project = project
+)
+
+tasks.register<Copy>("mergeFlashableScript") {
+    into("${project.projectDir}/src/main/resources/META-INF/com/google/android")
+    from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
+        rename { "update-binary" }
+    }
+    from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
+        rename { "updater-script" }
+    }
 }
 
 tasks.getByName("preBuild").dependsOn(
     "downloadKpimg",
-    "downloadKpatch",
     "downloadKptools",
-    "downloadApjni",
+    "downloadCompatKpatch",
+    "mergeFlashableScript",
 )
 
 // https://github.com/bbqsrc/cargo-ndk
@@ -178,6 +237,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.runtime.livedata)
     implementation(libs.androidx.webkit)
     implementation(libs.timber)
@@ -194,7 +254,6 @@ dependencies {
 
     implementation(libs.com.google.accompanist.drawablepainter)
     implementation(libs.com.google.accompanist.navigation.animation)
-    implementation(libs.com.google.accompanist.systemuicontroller)
 
     implementation(libs.compose.destinations.animations.core)
     ksp(libs.compose.destinations.ksp)
@@ -218,4 +277,5 @@ dependencies {
 
     implementation(libs.markdown)
     implementation(libs.com.google.accompanist.webview)
+    compileOnly(libs.cxx)
 }

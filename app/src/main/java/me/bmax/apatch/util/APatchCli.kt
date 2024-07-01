@@ -1,36 +1,55 @@
 package me.bmax.apatch.util
 
+import android.content.ContentResolver
 import android.content.Context
+import android.database.Cursor
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ShellUtils
-import dev.utils.app.AppUtils.getSharedPreferences
 import me.bmax.apatch.APApplication
 import me.bmax.apatch.BuildConfig
 import me.bmax.apatch.apApp
 import java.io.File
+
 
 private const val TAG = "APatchCli"
 private fun getKPatchPath(): String {
     return apApp.applicationInfo.nativeLibraryDir + File.separator + "libkpatch.so"
 }
 
+class RootShellInitializer : Shell.Initializer() {
+    override fun onInit(context: Context, shell: Shell): Boolean {
+        shell.newJob().add("export PATH=\$PATH:/system_ext/bin:/vendor/bin").exec()
+        return true
+    }
+}
+
+@Suppress("DEPRECATION")
 fun createRootShell(): Shell {
     Shell.enableVerboseLogging = BuildConfig.DEBUG
-    val builder = Shell.Builder.create()
+    val builder = Shell.Builder.create().setInitializers(RootShellInitializer::class.java)
     return try {
         builder.build(
-            getKPatchPath(),
-            APApplication.superKey,
-            "su",
-            "-Z",
-            APApplication.MAGISK_SCONTEXT
+            "/system/bin/truncate", APApplication.superKey, "-Z", APApplication.MAGISK_SCONTEXT
         )
     } catch (e: Throwable) {
         Log.e(TAG, "su failed: ", e)
-        builder.build("sh")
+        try {
+            Log.e(TAG, "retry compat kpatch su")
+            return builder.build(
+                getKPatchPath(),
+                APApplication.superKey,
+                "su",
+                "-Z",
+                APApplication.MAGISK_SCONTEXT
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "retry compat kpatch su failed: ", e)
+            return builder.build("sh")
+        }
     }
 }
 
@@ -52,25 +71,34 @@ fun rootAvailable(): Boolean {
     return shell.isRoot
 }
 
+@Suppress("DEPRECATION")
 fun tryGetRootShell(): Shell {
     Shell.enableVerboseLogging = BuildConfig.DEBUG
     val builder = Shell.Builder.create()
     return try {
         builder.build(
-            getKPatchPath(),
-            APApplication.superKey,
-            "su",
-            "-Z",
-            APApplication.MAGISK_SCONTEXT
+            "/system/bin/truncate", APApplication.superKey, "-Z", APApplication.MAGISK_SCONTEXT
         )
     } catch (e: Throwable) {
         Log.e(TAG, "su failed: ", e)
         return try {
-            Log.e(TAG, "retry su: ", e)
-            builder.build("su")
+            Log.e(TAG, "retry compat kpatch su")
+            builder.build(
+                getKPatchPath(),
+                APApplication.superKey,
+                "su",
+                "-Z",
+                APApplication.MAGISK_SCONTEXT
+            )
         } catch (e: Throwable) {
-            Log.e(TAG, "retry su failed: ", e)
-            builder.build("sh")
+            Log.e(TAG, "retry kpatch su failed: ", e)
+            return try {
+                Log.e(TAG, "retry su: ", e)
+                builder.build("su")
+            } catch (e: Throwable) {
+                Log.e(TAG, "retry su failed: ", e)
+                builder.build("sh")
+            }
         }
     }
 }
@@ -118,10 +146,7 @@ fun uninstallModule(id: String): Boolean {
 }
 
 fun installModule(
-    uri: Uri,
-    onFinish: (Boolean) -> Unit,
-    onStdout: (String) -> Unit,
-    onStderr: (String) -> Unit
+    uri: Uri, onFinish: (Boolean) -> Unit, onStdout: (String) -> Unit, onStderr: (String) -> Unit
 ): Boolean {
     val resolver = apApp.contentResolver
     with(resolver.openInputStream(uri)) {
@@ -162,7 +187,8 @@ fun reboot(reason: String = "") {
         // KEYCODE_POWER = 26, hide incorrect "Factory data reset" message
         getRootShell().newJob().add("/system/bin/input keyevent 26").exec()
     }
-    getRootShell().newJob().add("/system/bin/svc power reboot $reason || /system/bin/reboot $reason").exec()
+    getRootShell().newJob()
+        .add("/system/bin/svc power reboot $reason || /system/bin/reboot $reason").exec()
 }
 
 fun overlayFsAvailable(): Boolean {
@@ -179,15 +205,13 @@ fun hasMagisk(): Boolean {
 
 fun isGlobalNamespaceEnabled(): Boolean {
     val shell = getRootShell()
-    val result =
-        ShellUtils.fastCmd(shell, "cat ${APApplication.GLOBAL_NAMESPACE_FILE}")
+    val result = ShellUtils.fastCmd(shell, "cat ${APApplication.GLOBAL_NAMESPACE_FILE}")
     Log.i(TAG, "is global namespace enabled: $result")
     return result == "1"
 }
 
 fun setGlobalNamespaceEnabled(value: String) {
-    getRootShell().newJob()
-        .add("echo $value > ${APApplication.GLOBAL_NAMESPACE_FILE}")
+    getRootShell().newJob().add("echo $value > ${APApplication.GLOBAL_NAMESPACE_FILE}")
         .submit { result ->
             Log.i(TAG, "setGlobalNamespaceEnabled result: ${result.isSuccess} [${result.out}]")
         }
@@ -211,3 +235,14 @@ fun restartApp(packageName: String) {
     launchApp(packageName)
 }
 
+fun getFileNameFromUri(context: Context, uri: Uri): String? {
+    var fileName: String? = null
+    val contentResolver: ContentResolver = context.contentResolver
+    val cursor: Cursor? = contentResolver.query(uri, null, null, null, null)
+    cursor?.use {
+        if (it.moveToFirst()) {
+            fileName = it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+        }
+    }
+    return fileName
+}

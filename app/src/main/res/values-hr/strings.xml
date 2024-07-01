@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="reboot">Ponovno pokreni</string>
-    <string name="home">Početno</string>
+    <string name="home">Početna</string>
     <string name="patch">Patch</string>
     <string name="settings">Postavke</string>
     <string name="reboot_userspace">Glatko pokreni</string>
@@ -19,7 +18,7 @@
     <string name="safe_mode">Sigurni način</string>
     <string name="super_key">SuperKey</string>
     <string name="clear_super_key">Izbriši SuperKey</string>
-    <string name="home_patch_set_key_title">Postavi SuperKey</string>
+    <string name="patch_set_superkey">Postavi SuperKey</string>
     <string name="home_patch_next_step">Sljedeči korak</string>
     <string name="home_not_installed">Nije instalirano</string>
     <string name="home_install_unknown">Nepoznato</string>
@@ -67,7 +66,7 @@
     <string name="apm_not_installed">AndroidPatch nije instaliran</string>
     <string name="apm_failed_to_enable">Nije bilo moguće uključit \"%s\" modul</string>
     <string name="apm_empty">Nema modula instalirana</string>
-    <string name="apm_uninstall">Deinstaliraj</string>
+    <string name="apm_remove">Deinstaliraj</string>
     <string name="apm_install">Instaliraj</string>
     <string name="apm_start_downloading">Počni preuzimati %s</string>
     <string name="apm_new_version_available">Klikni za instaliranje nove inačice, %s.</string>
@@ -99,4 +98,6 @@
     <string name="settings_global_namespace_mode_summary">Sve root sesije koriste globalni mount namespace</string>
     <string name="home_patch_set_key_desc">Samo zaporke za KernelPatch</string>
     <string name="settings_clear_super_key_dialog">Želite li stvarno nastaviti?</string>
+    <string name="success">Uspješno</string>
+    <string name="failure">Neuspješno</string>
 </resources>

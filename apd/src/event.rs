@@ -1,11 +1,16 @@
 use anyhow::{bail, Context, Result};
 use log::{info, warn};
-use std::env;
+use std::os::unix::fs::PermissionsExt;
 use std::{collections::HashMap, path::Path};
+use std::{env, fs};
 
 use crate::module::prune_modules;
+use crate::supercall::fork_for_result;
 use crate::{
-    assets, defs, mount, restorecon,
+    assets, defs, mount,
+    package::synchronize_package_uid,
+    restorecon, supercall,
+    supercall::{init_load_su_path, init_load_su_uid},
     utils::{self, ensure_clean_dir},
 };
 
@@ -97,17 +102,35 @@ pub fn mount_systemlessly(module_dir: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn on_post_data_fs() -> Result<()> {
-
+pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     utils::umask(0);
 
     #[cfg(unix)]
     let _ = catch_bootlog();
 
+    init_load_su_uid(&superkey);
+
+    init_load_su_path(&superkey);
+
+    let args = ["/data/adb/ap/bin/magiskpolicy", "--magisk", "--live"];
+    fork_for_result("/data/adb/ap/bin/magiskpolicy", &args, &superkey);
+
+    info!("Re-privilege apd profile after injecting sepolicy");
+    supercall::privilege_apd_profile(&superkey);
+
     if utils::has_magisk() {
         warn!("Magisk detected, skip post-fs-data!");
         return Ok(());
     }
+
+    // Create log environment
+    if Path::new(defs::APATCH_LOG_FOLDER).exists() {
+        fs::remove_dir_all(defs::APATCH_LOG_FOLDER).expect("Failed to remove previous log dir");
+    }
+
+    fs::create_dir(defs::APATCH_LOG_FOLDER).expect("Failed to create log folder");
+    let permissions = fs::Permissions::from_mode(0o700);
+    fs::set_permissions(defs::APATCH_LOG_FOLDER, permissions).expect("Failed to set permissions");
 
     let key = "KERNELPATCH_VERSION";
     match env::var(key) {
@@ -121,12 +144,15 @@ pub fn on_post_data_fs() -> Result<()> {
         Err(_) => println!("{} not found", key),
     }
 
-    let safe_mode = crate::utils::is_safe_mode();
+    let safe_mode = utils::is_safe_mode(superkey.clone());
 
     if safe_mode {
         // we should still mount modules.img to `/data/adb/modules` in safe mode
         // becuase we may need to operate the module dir in safe mode
         warn!("safe mode, skip common post-fs-data.d scripts");
+        if let Err(e) = crate::module::disable_all_modules() {
+            warn!("disable all modules failed: {}", e);
+        }
     } else {
         // Then exec common post-fs-data scripts
         if let Err(e) = crate::module::exec_common_scripts("post-fs-data.d", true) {
@@ -145,7 +171,7 @@ pub fn on_post_data_fs() -> Result<()> {
     // we should clean the module mount point if it exists
     ensure_clean_dir(module_dir)?;
 
-    assets::ensure_binaries().with_context(|| "Failed to extract bin assets")?;
+    assets::ensure_binaries().with_context(|| "binary missing")?;
 
     if Path::new(module_update_img).exists() {
         if module_update_flag.exists() {
@@ -192,7 +218,7 @@ pub fn on_post_data_fs() -> Result<()> {
     if crate::module::load_sepolicy_rule().is_err() {
         warn!("load sepolicy.rule failed");
     }
-    
+
     if let Err(e) = mount::mount_tmpfs(utils::get_tmp_path()) {
         warn!("do temp dir mount failed: {}", e);
     }
@@ -213,14 +239,14 @@ pub fn on_post_data_fs() -> Result<()> {
         warn!("do systemless mount failed: {}", e);
     }
 
-    run_stage("post-mount", true);
+    run_stage("post-mount", superkey, true);
 
     std::env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
 
     Ok(())
 }
 
-fn run_stage(stage: &str, block: bool) {
+fn run_stage(stage: &str, superkey: Option<String>, block: bool) {
     utils::umask(0);
 
     if utils::has_magisk() {
@@ -228,8 +254,14 @@ fn run_stage(stage: &str, block: bool) {
         return;
     }
 
-    if crate::utils::is_safe_mode() {
+    let log_path = format!("{}trigger_{}.log", defs::APATCH_LOG_FOLDER, stage);
+    supercall::save_dmesg(log_path.as_str()).expect("Failed to save dmesg");
+
+    if utils::is_safe_mode(superkey) {
         warn!("safe mode, skip {stage} scripts");
+        if let Err(e) = crate::module::disable_all_modules() {
+            warn!("disable all modules failed: {}", e);
+        }
         return;
     }
 
@@ -241,14 +273,14 @@ fn run_stage(stage: &str, block: bool) {
     }
 }
 
-pub fn on_services() -> Result<()> {
+pub fn on_services(superkey: Option<String>) -> Result<()> {
     info!("on_services triggered!");
-    run_stage("service", false);
+    run_stage("service", superkey, false);
 
     Ok(())
 }
 
-pub fn on_boot_completed() -> Result<()> {
+pub fn on_boot_completed(superkey: Option<String>) -> Result<()> {
     info!("on_boot_completed triggered!");
     let module_update_img = Path::new(defs::MODULE_UPDATE_IMG);
     let module_img = Path::new(defs::MODULE_IMG);
@@ -262,11 +294,16 @@ pub fn on_boot_completed() -> Result<()> {
         }
     }
 
-    run_stage("boot-completed", false);
+    //synchronize_package_uid();
+    run_stage("boot-completed", superkey, false);
 
     Ok(())
 }
 
+pub fn on_sync_uid() -> Result<()> {
+    synchronize_package_uid();
+    return Ok(());
+}
 
 #[cfg(unix)]
 fn catch_bootlog() -> Result<()> {

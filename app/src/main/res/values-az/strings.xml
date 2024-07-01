@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="home">Ana səhifə</string>
     <string name="patch_warnning">Quraşdırma risklərlə gəlir. Zəhmət olmasa, məlumatlarınızın yedəkləndiyindən əmin olun.</string>
@@ -19,7 +18,7 @@
     <string name="safe_mode">Təhlükəsiz rejim</string>
     <string name="clear_super_key">Açarı silin</string>
     <string name="super_key">SuperAçar</string>
-    <string name="home_patch_set_key_title">SuperAçar təyin edin</string>
+    <string name="patch_set_superkey">SuperAçar təyin edin</string>
     <string name="home_patch_set_key_desc">Yalnız NüvəYamağı üçün etimadnamə</string>
     <string name="home_patch_next_step">Sonrakı addım</string>
     <string name="home_not_installed">Quraşdırılmayıb</string>
@@ -71,7 +70,7 @@
     <string name="apm_failed_to_enable">\"%s\" modulunu yandırmaq mümkün olmadı</string>
     <string name="apm_failed_to_disable">\"%s\" modulunu söndürmək mümkün olmadı</string>
     <string name="apm_empty">Heç bir modul quraşdırılmayıb</string>
-    <string name="apm_uninstall">Sil</string>
+    <string name="apm_remove">Sil</string>
     <string name="apm_uninstall_confirm">\"%s\" modulunu silmək istəyirsiniz mi?</string>
     <string name="apm_uninstall_success">%s silindi</string>
     <string name="apm_uninstall_failed">%s modulunu silmək mümkün olmadı</string>

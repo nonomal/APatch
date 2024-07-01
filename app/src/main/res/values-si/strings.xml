@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="home">මුල් පිටුව</string>
     <string name="reboot">Restart කරන්න</string>
     <string name="about">APatch පිළිබඳ</string>
     <string name="super_key">මුරපදය</string>
-    <string name="home_patch_set_key_title">නව මුර පදයක් සෑදීම</string>
+    <string name="patch_set_superkey">නව මුර පදයක් සෑදීම</string>
     <string name="home_patch_set_key_desc">ඔබගේ මුරපදය ඇතුළත් කරන්න</string>
     <string name="home_patch_next_step">ඉදිරියට</string>
     <string name="home_not_installed">ස්ථාපනය වී නොමැත</string>
@@ -38,7 +37,7 @@
     <string name="su_show_system_apps">System Apps ද පෙන්වන්න</string>
     <string name="home_auth_key_title">මුරපදය</string>
     <string name="apm_overlay_fs_not_available">ඔයාගේ Kernel එකේ OverlayFS කියන function එක enable වෙලා නැහැ. මේකට අපිටම කියලා OverlayFS enable කරපු Kernel එකක් compile කරගන්න ඕනි 😕!</string>
-    <string name="apm_uninstall">ඉවත් කරන්න</string>
+    <string name="apm_remove">ඉවත් කරන්න</string>
     <string name="apm_magisk_conflict">Magisk හි මොඩියුල්ස් සමග ගැටෙන නිසා, මෙම විශේෂාංගය තාවකාලිකව ක්‍රියා විරහිත කර ඇත!</string>
     <string name="apm_failed_to_enable">මෙම මොඩියුලය ක්‍රියාත්මක කිරීමට නොහැකි විය: %s</string>
     <string name="safe_mode">ආරක්ෂාකාරී mode එක</string>

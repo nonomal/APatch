@@ -5,22 +5,21 @@
     <string name="android_patch">AndroidPatch</string>
     <string name="apm">APModule</string>
     <string name="super_key">SuperKey</string>
-    <string name="home_learn_android_patch_url">https://github.com/bmax121/APatch</string>
     <string name="app_name" translatable="false">APatch</string>
     <string name="kpm">KPModule</string>
     <string name="reboot_recovery">But ke Recovery</string>
     <string name="reboot">Reboot</string>
     <string name="settings">Pengaturan</string>
     <string name="reboot_bootloader">But ke Bootloader</string>
-    <string name="home_click_to_learn_apatch">Pelajari fitur dan penggunaan AndroidPatch</string>
+    <string name="home_click_to_learn_apatch">Pelajari fitur dan penggunaan APatch</string>
     <string name="reboot_edl">But ke EDL</string>
-    <string name="home_learn_apatch">Pelajari AndroidPatch</string>
+    <string name="home_learn_apatch">Pelajari APatch</string>
     <string name="about">Tentang</string>
-    <string name="about_source_code">&lt;p&gt;Lihat kode sumber di %1$s&lt;p/&gt;Gabung kanal %2$s kami&lt;p/&gt;Gabung grup %2$s kami</string>
+    <string name="about_source_code">&lt;p&gt;Lihat kode sumber di %1$s&lt;p/&gt;Gabung kanal %2$s kami&lt;p/&gt;Gabung grup %3$s kami</string>
     <string name="send_log">Kirim Log</string>
     <string name="safe_mode">Mode aman</string>
     <string name="home_patch_set_key_desc">Kredensial untuk KernelPatch</string>
-    <string name="home_patch_set_key_title">Pasang SuperKey</string>
+    <string name="patch_set_superkey">Pasang SuperKey</string>
     <string name="home_install_unknown">Belum diinstal/autentikasi</string>
     <string name="home_click_to_install">Klik untuk menginstal</string>
     <string name="home_patch_next_step">Selanjutnya</string>
@@ -45,14 +44,14 @@
     <string name="patch_title">Patch</string>
     <string name="apm_uninstall_success">%s berhasil dihapus</string>
     <string name="apm_install">Instal</string>
-    <string name="apm_uninstall">Hapus</string>
-    <string name="apm_uninstall_confirm">Hapus modul %s?</string>
+    <string name="apm_remove">Hapus</string>
+    <string name="apm_uninstall_confirm">Hapus modul \"%s\"?</string>
     <string name="apm_version">Versi</string>
     <string name="apm_overlay_fs_not_available">Kernel tidak mendukung OverlayFS, fungsi modul ditiadakan.</string>
     <string name="apm_uninstall_failed">Gagal menghapus %s</string>
     <string name="apm_magisk_conflict">Konflik dengan Magisk, fungsi modul ditiadakan.</string>
     <string name="apm_desc">Ket.</string>
-    <string name="apm_empty">Tidak ada modul</string>
+    <string name="apm_empty">Tidak ada modul terinstal</string>
     <string name="apm_author">Oleh</string>
     <string name="apm_reboot_to_apply">Reboot agar berfungsi</string>
     <string name="apm_start_downloading">Mulai mengunduh %s</string>
@@ -64,12 +63,12 @@
     <string name="apm_new_version_available">Klik untuk membarui ke versi %s.</string>
     <string name="apm_update">Membarui</string>
     <string name="su_refresh">Muat ulang</string>
-    <string name="apm_failed_to_disable">Gagal menonaktifkan modul %s</string>
-    <string name="apm_failed_to_enable">Gagal mengaktifkan modul %s</string>
+    <string name="apm_failed_to_disable">Gagal menonaktifkan modul \"%s\"</string>
+    <string name="apm_failed_to_enable">Gagal mengaktifkan modul \"%s\"</string>
     <string name="su_hide_system_apps">Sembunyikan aplikasi sistem</string>
     <string name="kpm_kp_not_installed">KernelPatch tidak terinstal</string>
-    <string name="su_pkg_excluded_setting_title">Kecualikan</string>
-    <string name="su_pkg_excluded_setting_summary">untuk modul</string>
+    <string name="su_pkg_excluded_setting_title">Modifikasi dikecualikan</string>
+    <string name="su_pkg_excluded_setting_summary">Aktifkan opsi ini agar APatch dapat memulihkan kembali berkas termodifikasi oleh modul pada aplikasi ini.</string>
     <string name="su_pkg_excluded_label">dikecualikan</string>
     <string name="su_title">SuperUser</string>
     <string name="su_selinux_via_hook">bypass via hook</string>
@@ -77,9 +76,9 @@
     <string name="reboot_userspace">SoftReboot</string>
     <string name="home_selinux_status_unknown">Unknown</string>
     <string name="home_selinux_status_permissive">Permissive</string>
-    <string name="home_selinux_status">SELinux</string>
+    <string name="home_selinux_status">Status SELinux</string>
     <string name="kpm_load_toast_failed">Gagal memuat</string>
-    <string name="home_selinux_status_disabled">Nonaktif</string>
+    <string name="home_selinux_status_disabled">Mati</string>
     <string name="kpm_load">Muat</string>
     <string name="home_selinux_status_enforcing">Enforcing</string>
     <string name="kpm_license">Lisensi</string>
@@ -115,7 +114,7 @@
     <string name="patch_item_kpimg">KPimg</string>
     <string name="kpatch_shadow_path_title">KPatch</string>
     <string name="patch_item_new_extra_kpm">Tanam baru</string>
-    <string name="patch_item_existed_extra_kpm">Terpasang</string>
+    <string name="patch_item_existed_extra_kpm">Tertanam</string>
     <string name="patch_item_extra_name">Nama:</string>
     <string name="patch_item_extra_kpm_license">Lisensi:</string>
     <string name="patch_item_extra_kpm_desciption">Deskripsi:</string>
@@ -131,7 +130,7 @@
     <string name="patch_item_bootimg_slot">Slot:</string>
     <string name="kpm_add_kpm">Tambah KPM</string>
     <string name="kpm_install">Instal</string>
-    <string name="kpm_embed">Tertanam</string>
+    <string name="kpm_embed">Tanam</string>
     <string name="hide_apatch_manager_failure">Gagal menyembunyikan, laporkan bug ini!</string>
     <string name="hide_apatch_manager_summary">Instal manajer dengan label nama dipilih dan ID paket teracak</string>
     <string name="hide_apatch_dialog_new_manager_name">Nama baru manajer</string>
@@ -143,7 +142,7 @@
     <string name="setting_reset_su_path">Reset jalur SU</string>
     <string name="patch_mode_install_to_next_slot">Mode: Instal ke Slot lainnya (Setelah OTA)</string>
     <string name="settings_check_update_summary">Cek versi terbaru setiap membuka manajer</string>
-    <string name="webui_open">Buka WebUI</string>
+    <string name="apm_webui_open">Buka</string>
     <string name="home_dialog_auth_fail_title">Gagal autentikasi</string>
     <string name="home_more_menu_about">Tentang</string>
     <string name="mode_select_page_patch_and_install">Patch dan Instal</string>
@@ -153,12 +152,12 @@
     <string name="mode_select_page_install_inactive_slot">Instal ke slot nonaktif (setelah OTA)</string>
     <string name="home_kpatch_version">KernelPatch</string>
     <string name="enable_web_debugging">Pengawakutuan WebVeiw</string>
-    <string name="mode_select_page_install_inactive_slot_warning">Gawai akan **DIPAKSA** but ke slot nonaktif!
+    <string name="mode_select_page_install_inactive_slot_warning">Gawai akan **DIPAKSA** untuk but ke slot nonaktif!
 \nHANYA gunakan setelah proses OTA selesai.
 \nLanjutkan?</string>
     <string name="home_dialog_uninstall_title">Hapus</string>
     <string name="home_dialog_uninstall_ap_only">Hapus AndroidPatch</string>
-    <string name="home_dialog_uninstall_all">Hapus sepenuhnya</string>
+    <string name="home_dialog_uninstall_all">Hapus Semua</string>
     <string name="settings_check_update">Cek terbaru</string>
     <string name="home_install_unknown_summary">Klik untuk menginstal</string>
     <string name="home_device_info">Gawai</string>
@@ -166,7 +165,7 @@
     <string name="home_dialog_auth_fail_content">Gagal autentikasi SuperKey, APatch tidak dapat berfungsi normal.
 \nHal ini dapat disebabkan oleh:
 \n1. Boot Image tidak di-patch dengan KernelPatch.
-\n2. Tidak menginstal/flash Boot Image yg sudah di-patch.
+\n2. Tidak menginstal/pasang Boot Image yg sudah di-patch.
 \n3. Salah memasukkan SuperKey.
 \n4. Gawai tidak mendukung APatch dan KernelPatch.
 \n
@@ -175,4 +174,42 @@
     <string name="settings_donot_store_superkey_summary">Autentikasi SuperKey setiap membuka manajer</string>
     <string name="settings_donot_store_superkey">Jangan simpan SuperKey</string>
     <string name="home_new_apatch_found">Tersedia versi terbaru: %s, Klik untuk membarui</string>
+    <string name="kpm_control_failed">Operasi gagal!</string>
+    <string name="settings_night_mode_follow_sys_summary">Gunakan tema gelap dari pengaturan bawaan sistem</string>
+    <string name="settings_night_theme_enabled">Aktifkan Tema Gelap</string>
+    <string name="settings_use_system_color_theme">Tema Corak Wallpaper</string>
+    <string name="settings_use_system_color_theme_summary">Gunakan corak warna yang diperoleh sistem dari wallpaper saat ini</string>
+    <string name="settings_custom_color_theme">Tema Warna</string>
+    <string name="red_theme">Tema Merah</string>
+    <string name="sakura_theme">Tema Sakura</string>
+    <string name="teal_theme">Tema Teal</string>
+    <string name="kpm_control_dialog_title">KPModule Kontrol</string>
+    <string name="amber_theme">Tema Amber</string>
+    <string name="blue_grey_theme">Tema Sebam</string>
+    <string name="cyan_theme">Tema Sian</string>
+    <string name="deep_orange_theme">Tema Jingga Gelap</string>
+    <string name="green_theme">Tema Hijau</string>
+    <string name="light_blue_theme">Tema Biru Terang</string>
+    <string name="light_green_theme">Tema Hijau Terang</string>
+    <string name="pink_theme">Tema Merah Muda</string>
+    <string name="kpm_control">Kontrol</string>
+    <string name="about_app_version">Versi %1$s</string>
+    <string name="about_powered_by">Didukung oleh %1$s</string>
+    <string name="blue_theme">Tema Biru</string>
+    <string name="brown_theme">Tema Cokelat</string>
+    <string name="lime_theme">Tema Limau</string>
+    <string name="orange_theme">Tema Jingga</string>
+    <string name="indigo_theme">Tema Nila</string>
+    <string name="purple_theme">Tema Ungu</string>
+    <string name="kpm_control_dialog_content">Input parameter kontrol:</string>
+    <string name="kpm_control_ok">Operasi berhasil!</string>
+    <string name="deep_purple_theme">Tema Ungu Gelap</string>
+    <string name="yellow_theme">Tema Kuning</string>
+    <string name="about_telegram_channel">Kanal Telegram</string>
+    <string name="about_app_desc">Metode root dengan menggunakan kernel image, memberikan fungsi untuk memuat modul dan fungsi hook via kernel.</string>
+    <string name="about_telegram_group">Grup Telegram</string>
+    <string name="kpm_control_paramters">Parameter</string>
+    <string name="kpm_control_outMsg">Pesan</string>
+    <string name="settings_night_mode_follow_sys">Tema Gelap Bawaan Sistem</string>
+    <string name="save_log">Simpan Log</string>
 </resources>

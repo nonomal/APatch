@@ -6,12 +6,19 @@ use android_logger::Config;
 #[cfg(target_os = "android")]
 use log::LevelFilter;
 
-use crate::{defs, event, module, utils};
+use crate::{defs, event, module, supercall, utils};
 
 /// APatch cli
 #[derive(Parser, Debug)]
 #[command(author, version = defs::VERSION_CODE, about, long_about = None)]
 struct Args {
+    #[arg(
+        short,
+        long,
+        value_name = "KEY",
+        help = "Super key for authentication root"
+    )]
+    superkey: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -32,6 +39,9 @@ enum Commands {
 
     /// Trigger `boot-complete` event
     BootCompleted,
+
+    /// Sync package uid from system's packages.list
+    SyncPackageUid,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -69,7 +79,7 @@ pub fn run() -> Result<()> {
     android_logger::init_once(
         Config::default()
             .with_max_level(LevelFilter::Trace) // limit log level
-            .with_tag("APatchD"), 
+            .with_tag("APatchD"),
     );
 
     #[cfg(not(target_os = "android"))]
@@ -77,7 +87,7 @@ pub fn run() -> Result<()> {
 
     // the kernel executes su with argv[0] = "/system/bin/kp" or "/system/bin/su" or "su" or "kp" and replace it with us
     let arg0 = std::env::args().next().unwrap_or_default();
-    if arg0 == "/system/bin/kp" || arg0 == "/system/bin/su" || arg0 == "su" || arg0 == "kp" {
+    if arg0.ends_with("kp") || arg0.ends_with("su") {
         return crate::apd::root_shell();
     }
 
@@ -85,10 +95,14 @@ pub fn run() -> Result<()> {
 
     log::info!("command: {:?}", cli.command);
 
-    let result = match cli.command {
-        Commands::PostFsData => event::on_post_data_fs(),
+    if let Some(ref _superkey) = cli.superkey {
+        supercall::privilege_apd_profile(&cli.superkey);
+    }
 
-        Commands::BootCompleted => event::on_boot_completed(),
+    let result = match cli.command {
+        Commands::PostFsData => event::on_post_data_fs(cli.superkey),
+
+        Commands::BootCompleted => event::on_boot_completed(cli.superkey),
 
         Commands::Module { command } => {
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -105,7 +119,9 @@ pub fn run() -> Result<()> {
             }
         }
 
-        Commands::Services => event::on_services(),
+        Commands::Services => event::on_services(cli.superkey),
+
+        Commands::SyncPackageUid => event::on_sync_uid(),
     };
 
     if let Err(e) = &result {

@@ -7,48 +7,29 @@ plugins {
     alias(libs.plugins.agp.app) apply false
     alias(libs.plugins.agp.lib) apply false
     alias(libs.plugins.kotlin) apply false
+    alias(libs.plugins.kotlin.compose.compiler) apply false
     alias(libs.plugins.lsplugin.cmaker)
 }
 
 cmaker {
     default {
-        arguments.addAll(
-            arrayOf(
-                "-DANDROID_STL=c++_static",
-            )
-        )
-        val flags = arrayOf(
-            "-Wno-gnu-string-literal-operator-template",
-            "-Wno-c++2b-extensions",
-        )
-        cFlags.addAll(flags)
-        cppFlags.addAll(flags)
+        arguments += "-DANDROID_STL=none"
         abiFilters("arm64-v8a")
-    }
-    buildTypes {
-        if (it.name == "release") {
-            arguments += "-DDEBUG_SYMBOLS_PATH=${buildDir.absolutePath}/symbols"
-        }
     }
 }
 
-project.ext.set("kernelPatchVersion", "0.10.5-dev")
+project.ext.set("kernelPatchVersion", "0.11.0-dev")
 
 val androidMinSdkVersion = 26
 val androidTargetSdkVersion = 34
 val androidCompileSdkVersion = 34
 
-val androidCompileNdkVersion = "25.2.9519653"
-
-val androidSourceCompatibility = JavaVersion.VERSION_17
-val androidTargetCompatibility = JavaVersion.VERSION_17
-
+val androidCompileNdkVersion = "26.3.11579264"
 val managerVersionCode by extra(getVersionCode())
 val managerVersionName by extra(getVersionName())
 
-
 tasks.register<Delete>("clean") {
-    delete(rootProject.buildDir)
+    delete(rootProject.layout.buildDirectory)
 }
 
 fun getGitCommitCount(): Int {
@@ -104,11 +85,6 @@ subprojects {
             lint {
                 abortOnError = true
                 checkReleaseBuilds = false
-            }
-
-            compileOptions {
-                sourceCompatibility = androidSourceCompatibility
-                targetCompatibility = androidTargetCompatibility
             }
         }
     }

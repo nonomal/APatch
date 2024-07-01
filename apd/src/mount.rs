@@ -1,18 +1,23 @@
-use anyhow::{anyhow, bail, Ok, Result};
-
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use anyhow::Context;
+use anyhow::{anyhow, bail, Ok, Result};
 #[cfg(any(target_os = "linux", target_os = "android"))]
+#[allow(unused_imports)]
 use retry::delay::NoDelay;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 //use sys_mount::{unmount, FilesystemType, Mount, MountFlags, Unmount, UnmountFlags};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use rustix::{fd::AsFd, fs::CWD, mount::*};
+use std::fs::create_dir;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::unix::fs::PermissionsExt;
 
 use crate::defs::AP_OVERLAY_SOURCE;
+use crate::defs::PTS_NAME;
 use log::{info, warn};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use procfs::process::Process;
+use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -23,7 +28,24 @@ pub struct AutoMountExt4 {
 
 impl AutoMountExt4 {
     #[cfg(any(target_os = "linux", target_os = "android"))]
+
     pub fn try_new(source: &str, target: &str, auto_umount: bool) -> Result<Self> {
+        let path = Path::new(source);
+        if !path.exists() {
+            println!("Source path does not exist");
+        } else {
+            let metadata = fs::metadata(path)?;
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            
+            if permissions.readonly(){
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            println!("File permissions: {:o} (octal)",mode & 0o777);
+            
+            }
+
+        }
+
         mount_ext4(source, target)?;
         Ok(Self {
             target: target.to_string(),
@@ -58,9 +80,9 @@ impl Drop for AutoMountExt4 {
 
 #[allow(dead_code)]
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub fn mount_image(src: &str, target: &str, autodrop: bool) -> Result<()> {
+pub fn mount_image(src: &str, target: &str, _autodrop: bool) -> Result<()> {
     mount_ext4(src, target)?;
-        Ok(())
+    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -114,14 +136,21 @@ pub fn mount_overlayfs(
         upperdir,
         workdir
     );
-    if let Result::Ok(fs) = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC) {
+
+    let upperdir = upperdir
+        .filter(|up| up.exists())
+        .map(|e| e.display().to_string());
+    let workdir = workdir
+        .filter(|wd| wd.exists())
+        .map(|e| e.display().to_string());
+
+    let result = (|| {
+        let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
         let fs = fs.as_fd();
-        fsconfig_set_string(fs, "lowerdir", lowerdir_config)?;
-        if let (Some(upperdir), Some(workdir)) = (upperdir, workdir) {
-            if upperdir.exists() && workdir.exists() {
-                fsconfig_set_string(fs, "upperdir", upperdir.display().to_string())?;
-                fsconfig_set_string(fs, "workdir", workdir.display().to_string())?;
-            }
+        fsconfig_set_string(fs, "lowerdir", &lowerdir_config)?;
+        if let (Some(upperdir), Some(workdir)) = (&upperdir, &workdir) {
+            fsconfig_set_string(fs, "upperdir", upperdir)?;
+            fsconfig_set_string(fs, "workdir", workdir)?;
         }
         fsconfig_set_string(fs, "source", AP_OVERLAY_SOURCE)?;
         fsconfig_create(fs)?;
@@ -132,17 +161,14 @@ pub fn mount_overlayfs(
             CWD,
             dest.as_ref(),
             MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
-        )?;
-    } else {
+        )
+    })();
+
+    if let Err(e) = result {
+        warn!("fsopen mount failed: {:#}, fallback to mount", e);
         let mut data = format!("lowerdir={lowerdir_config}");
         if let (Some(upperdir), Some(workdir)) = (upperdir, workdir) {
-            if upperdir.exists() && workdir.exists() {
-                data = format!(
-                    "{data},upperdir={},workdir={}",
-                    upperdir.display(),
-                    workdir.display()
-                );
-            }
+            data = format!("{data},upperdir={upperdir},workdir={workdir}");
         }
         mount(
             AP_OVERLAY_SOURCE,
@@ -154,8 +180,22 @@ pub fn mount_overlayfs(
     }
     Ok(())
 }
-
-
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn mount_devpts(dest: impl AsRef<Path>) -> Result<()> {
+    create_dir(dest.as_ref())?;
+    mount(
+        AP_OVERLAY_SOURCE,
+        dest.as_ref(),
+        "devpts",
+        MountFlags::empty(),
+        "newinstance",
+    )?;
+    Ok(())
+}
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn mount_devpts(_dest: impl AsRef<Path>) -> Result<()> {
+    unimplemented!()
+}
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn mount_tmpfs(dest: impl AsRef<Path>) -> Result<()> {
     info!("mount tmpfs on {}", dest.as_ref().display());
@@ -180,12 +220,15 @@ pub fn mount_tmpfs(dest: impl AsRef<Path>) -> Result<()> {
             "",
         )?;
     }
+    let pts_dir = format!("{}/{PTS_NAME}", dest.as_ref().display());
+    if let Err(e) = mount_devpts(pts_dir) {
+        warn!("do devpts mount failed: {}", e);
+    }
     Ok(())
 }
 
-
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn bind_mount(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+pub fn bind_mount(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     info!(
         "bind mount {} -> {}",
         from.as_ref().display(),

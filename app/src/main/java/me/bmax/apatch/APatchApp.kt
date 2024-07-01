@@ -3,19 +3,20 @@ package me.bmax.apatch
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import coil.Coil
-import coil.ImageLoader
 import com.topjohnwu.superuser.CallbackList
-import com.topjohnwu.superuser.Shell
-import com.topjohnwu.superuser.internal.MainShell
-import me.bmax.apatch.util.*
-import me.zhanghai.android.appiconloader.coil.AppIconFetcher
-import me.zhanghai.android.appiconloader.coil.AppIconKeyer
+import me.bmax.apatch.util.APatchCli
+import me.bmax.apatch.util.APatchKeyHelper
+import me.bmax.apatch.util.Version
+import me.bmax.apatch.util.getRootShell
+import me.bmax.apatch.util.rootShellForResult
 import java.io.File
 import kotlin.concurrent.thread
+import kotlin.system.exitProcess
 
 lateinit var apApp: APApplication
 
@@ -25,21 +26,16 @@ class APApplication : Application() {
     enum class State {
         UNKNOWN_STATE,
 
-        KERNELPATCH_INSTALLED,
-        KERNELPATCH_NEED_UPDATE,
-        KERNELPATCH_NEED_REBOOT,
-        KERNELPATCH_UNINSTALLING,
+        KERNELPATCH_INSTALLED, KERNELPATCH_NEED_UPDATE, KERNELPATCH_NEED_REBOOT, KERNELPATCH_UNINSTALLING,
 
-        ANDROIDPATCH_NOT_INSTALLED,
-        ANDROIDPATCH_INSTALLED,
-        ANDROIDPATCH_INSTALLING,
-        ANDROIDPATCH_NEED_UPDATE,
-        ANDROIDPATCH_UNINSTALLING,
+        ANDROIDPATCH_NOT_INSTALLED, ANDROIDPATCH_INSTALLED, ANDROIDPATCH_INSTALLING, ANDROIDPATCH_NEED_UPDATE, ANDROIDPATCH_UNINSTALLING,
     }
 
 
     companion object {
         const val APD_PATH = "/data/adb/apd"
+
+        @Deprecated("No more KPatch ELF from 0.11.0-dev")
         const val KPATCH_PATH = "/data/adb/kpatch"
         const val SUPERCMD = "/system/bin/truncate"
         const val APATCH_FOLDER = "/data/adb/ap/"
@@ -63,7 +59,7 @@ class APApplication : Application() {
         private const val DEFAULT_SU_PATH = "/system/bin/kp"
         private const val LEGACY_SU_PATH = "/system/bin/su"
 
-        const val SP_NAME  = "config"
+        const val SP_NAME = "config"
         private const val SHOW_BACKUP_WARN = "show_backup_warning"
         lateinit var sharedPreferences: SharedPreferences
 
@@ -79,6 +75,7 @@ class APApplication : Application() {
         private val _apStateLiveData = MutableLiveData(State.UNKNOWN_STATE)
         val apStateLiveData: LiveData<State> = _apStateLiveData
 
+        @Suppress("DEPRECATION")
         fun uninstallApatch() {
             if (_apStateLiveData.value != State.ANDROIDPATCH_INSTALLED) return
             _apStateLiveData.value = State.ANDROIDPATCH_UNINSTALLING
@@ -104,10 +101,10 @@ class APApplication : Application() {
             }
         }
 
+        @Suppress("DEPRECATION")
         fun installApatch() {
             val state = _apStateLiveData.value
-            if (state != State.ANDROIDPATCH_NOT_INSTALLED &&
-                state != State.ANDROIDPATCH_NEED_UPDATE) {
+            if (state != State.ANDROIDPATCH_NOT_INSTALLED && state != State.ANDROIDPATCH_NEED_UPDATE) {
                 return
             }
             _apStateLiveData.value = State.ANDROIDPATCH_INSTALLING
@@ -118,12 +115,6 @@ class APApplication : Application() {
             val cmds = arrayOf(
                 "mkdir -p $APATCH_BIN_FOLDER",
                 "mkdir -p $APATCH_LOG_FOLDER",
-
-                // TODO: kpatch extracted from kernel
-                "cp -f ${nativeDir}/libkpatch.so $KPATCH_PATH",
-                "chmod +x $KPATCH_PATH",
-                "ln -s $KPATCH_PATH $KPATCH_LINK_PATH",
-                "restorecon $KPATCH_PATH",
 
                 "cp -f ${nativeDir}/libapd.so $APD_PATH",
                 "chmod +x $APD_PATH",
@@ -167,10 +158,12 @@ class APApplication : Application() {
             set(value) {
                 field = value
                 val ready = Natives.nativeReady(value)
-                _kpStateLiveData.value = if (ready) State.KERNELPATCH_INSTALLED else State.UNKNOWN_STATE
-                _apStateLiveData.value = if (ready) State.ANDROIDPATCH_NOT_INSTALLED else State.UNKNOWN_STATE
+                _kpStateLiveData.value =
+                    if (ready) State.KERNELPATCH_INSTALLED else State.UNKNOWN_STATE
+                _apStateLiveData.value =
+                    if (ready) State.ANDROIDPATCH_NOT_INSTALLED else State.UNKNOWN_STATE
                 Log.d(TAG, "state: " + _kpStateLiveData.value)
-                if(!ready) return
+                if (!ready) return
 
                 APatchKeyHelper.writeSPSuperKey(value)
 
@@ -193,7 +186,7 @@ class APApplication : Application() {
                     }
                     Log.d(TAG, "kp state: " + _kpStateLiveData.value)
 
-                    if(File(NEED_REBOOT_FILE).exists()) {
+                    if (File(NEED_REBOOT_FILE).exists()) {
                         _kpStateLiveData.postValue(State.KERNELPATCH_NEED_REBOOT)
                     }
                     Log.d(TAG, "kp state: " + _kpStateLiveData.value)
@@ -203,7 +196,7 @@ class APApplication : Application() {
                     val installedApdVInt = Version.installedApdVUInt()
                     Log.d(TAG, "manager version: $mgv, installed apd version: $installedApdVInt")
 
-                    if(Version.installedApdVInt > 0) {
+                    if (Version.installedApdVInt > 0) {
                         _apStateLiveData.postValue(State.ANDROIDPATCH_INSTALLED)
                     }
 
@@ -230,22 +223,20 @@ class APApplication : Application() {
         super.onCreate()
         apApp = this
 
+        val isArm64 = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
+        if (!isArm64) {
+            Toast.makeText(applicationContext, "Unsupported architecture!", Toast.LENGTH_LONG)
+                .show()
+            Thread.sleep(5000)
+            exitProcess(0)
+        }
+
         // TODO: We can't totally protect superkey from be stolen by root or LSPosed-like injection tools in user space, the only way is don't use superkey,
         // TODO: 1. make me root by kernel
         // TODO: 2. remove all usage of superkey
         sharedPreferences = getSharedPreferences(SP_NAME, Context.MODE_PRIVATE)
+        APatchKeyHelper.setSharedPreferences(sharedPreferences)
         superKey = APatchKeyHelper.readSPSuperKey()
-
-        val context = this
-        val iconSize = resources.getDimensionPixelSize(android.R.dimen.app_icon_size)
-        Coil.setImageLoader(
-            ImageLoader.Builder(context)
-                .components {
-                    add(AppIconKeyer())
-                    add(AppIconFetcher.Factory(iconSize, false, context))
-                }
-                .build()
-        )
     }
 
     fun getBackupWarningState(): Boolean {

@@ -15,35 +15,32 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,13 +54,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ramcosta.composedestinations.annotation.Destination
@@ -72,30 +70,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.bmax.apatch.APApplication
-import me.bmax.apatch.APApplication.Companion.SAFEMODE_FILE
+import me.bmax.apatch.Natives
 import me.bmax.apatch.R
+import me.bmax.apatch.ui.WebUIActivity
 import me.bmax.apatch.ui.component.ConfirmResult
+import me.bmax.apatch.ui.component.ModuleRemoveButton
+import me.bmax.apatch.ui.component.ModuleStateIndicator
+import me.bmax.apatch.ui.component.ModuleUpdateButton
 import me.bmax.apatch.ui.component.rememberConfirmDialog
 import me.bmax.apatch.ui.component.rememberLoadingDialog
 import me.bmax.apatch.ui.screen.destinations.InstallScreenDestination
 import me.bmax.apatch.ui.viewmodel.APModuleViewModel
-import me.bmax.apatch.ui.webui.WebUIActivity
-import me.bmax.apatch.util.LocalSnackbarHost
+import me.bmax.apatch.util.DownloadListener
 import me.bmax.apatch.util.download
-import me.bmax.apatch.util.getRootShell
 import me.bmax.apatch.util.hasMagisk
-import me.bmax.apatch.util.isScrollingUp
 import me.bmax.apatch.util.reboot
-import me.bmax.apatch.util.shellForResult
 import me.bmax.apatch.util.toggleModule
-import me.bmax.apatch.util.tryGetRootShell
+import me.bmax.apatch.util.ui.LocalSnackbarHost
 import me.bmax.apatch.util.uninstallModule
 import okhttp3.OkHttpClient
-
-private fun getSafeMode(): Boolean {
-    val shell = getRootShell()
-    return shellForResult(shell, "[ -e $SAFEMODE_FILE ] && echo 'IS_SAFE_MODE'").out.contains("IS_SAFE_MODE")
-}
 
 @Destination
 @Composable
@@ -129,7 +122,8 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
         }
     }
 
-    val isSafeMode = getSafeMode()
+    //TODO: FIXME -> val isSafeMode = Natives.getSafeMode()
+    val isSafeMode = false;
     val hasMagisk = hasMagisk()
     val hideInstallButton = isSafeMode || hasMagisk || !viewModel.isOverlayAvailable
 
@@ -141,7 +135,6 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
         { /* Empty */ }
     } else {
         {
-            val moduleInstall = stringResource(id = R.string.apm_install)
             val selectZipLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.StartActivityForResult()
             ) {
@@ -158,17 +151,19 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
                 viewModel.markNeedRefresh()
             }
 
-            ExtendedFloatingActionButton(
+            FloatingActionButton(contentColor = MaterialTheme.colorScheme.onPrimary,
+                containerColor = MaterialTheme.colorScheme.primary,
                 onClick = {
                     // select the zip file to install
                     val intent = Intent(Intent.ACTION_GET_CONTENT)
                     intent.type = "application/zip"
                     selectZipLauncher.launch(intent)
-                },
-                expanded = moduleListState.isScrollingUp(),
-                icon = { Icon(Icons.Filled.Add, moduleInstall) },
-                text = { Text(text = moduleInstall) },
-            )
+                }) {
+                Icon(
+                    painter = painterResource(id = R.drawable.package_import),
+                    contentDescription = null
+                )
+            }
         }
     }) { innerPadding ->
         when {
@@ -187,21 +182,21 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
             }
 
             else -> {
-                ModuleList(
-                    viewModel = viewModel,
+                ModuleList(viewModel = viewModel,
                     modifier = Modifier
                         .padding(innerPadding)
                         .fillMaxSize(),
                     state = moduleListState,
-                    onInstallModule =
-                    {
+                    onInstallModule = {
                         navigator.navigate(InstallScreenDestination(it))
-                    }, onClickModule = { id, name, hasWebUi ->
+                    },
+                    onClickModule = { id, name, hasWebUi ->
                         if (hasWebUi) {
-                            context.startActivity(Intent(context, WebUIActivity::class.java)
-                                .setData(Uri.parse("apatch://webui/$id"))
-                                .putExtra("id", id)
-                                .putExtra("name", name)
+                            context.startActivity(
+                                Intent(
+                                    context, WebUIActivity::class.java
+                                ).setData(Uri.parse("apatch://webui/$id")).putExtra("id", id)
+                                    .putExtra("name", name)
                             )
                         }
                     })
@@ -226,7 +221,7 @@ private fun ModuleList(
     val reboot = stringResource(id = R.string.reboot)
     val rebootToApply = stringResource(id = R.string.apm_reboot_to_apply)
     val moduleStr = stringResource(id = R.string.apm)
-    val uninstall = stringResource(id = R.string.apm_uninstall)
+    val uninstall = stringResource(id = R.string.apm_remove)
     val cancel = stringResource(id = android.R.string.cancel)
     val moduleUninstallConfirm = stringResource(id = R.string.apm_uninstall_confirm)
     val updateText = stringResource(R.string.apm_update)
@@ -275,16 +270,13 @@ private fun ModuleList(
 
         withContext(Dispatchers.Main) {
             Toast.makeText(
-                context,
-                startDownloadingText.format(module.name),
-                Toast.LENGTH_SHORT
+                context, startDownloadingText.format(module.name), Toast.LENGTH_SHORT
             ).show()
         }
 
         val downloading = downloadingText.format(module.name)
         withContext(Dispatchers.IO) {
-            download(
-                context,
+            download(context,
                 downloadUrl,
                 fileName,
                 downloading,
@@ -293,8 +285,7 @@ private fun ModuleList(
                     launch(Dispatchers.Main) {
                         Toast.makeText(context, downloading, Toast.LENGTH_SHORT).show()
                     }
-                }
-            )
+                })
         }
     }
 
@@ -334,7 +325,8 @@ private fun ModuleList(
         }
     }
 
-    val refreshState = rememberPullRefreshState(refreshing = viewModel.isRefreshing,
+    val refreshState = rememberPullRefreshState(
+        refreshing = viewModel.isRefreshing,
         onRefresh = { viewModel.fetchModuleList() })
     Box(modifier.pullRefresh(refreshState)) {
         LazyColumn(
@@ -372,8 +364,7 @@ private fun ModuleList(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                stringResource(R.string.apm_empty),
-                                textAlign = TextAlign.Center
+                                stringResource(R.string.apm_empty), textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -432,7 +423,7 @@ private fun ModuleList(
             }
         }
 
-//        DownloadListener(context, onInstallModule)
+        DownloadListener(context, onInstallModule)
 
         PullRefreshIndicator(
             refreshing = viewModel.isRefreshing, state = refreshState, modifier = Modifier.align(
@@ -457,127 +448,122 @@ private fun ModuleItem(
     onCheckChanged: (Boolean) -> Unit,
     onUpdate: (APModuleViewModel.ModuleInfo) -> Unit,
     onClick: (APModuleViewModel.ModuleInfo) -> Unit,
+    modifier: Modifier = Modifier,
+    alpha: Float = 1f,
 ) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick(module) },
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    val decoration = if (!module.remove) TextDecoration.None else TextDecoration.LineThrough
+    val moduleAuthor = stringResource(id = R.string.apm_author)
+
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(20.dp)
     ) {
 
-        val textDecoration = if (!module.remove) null else TextDecoration.LineThrough
-
-        Column(modifier = Modifier.padding(24.dp, 16.dp, 24.dp, 0.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick(module) },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
             ) {
-                val moduleVersion = stringResource(id = R.string.apm_version)
-                val moduleAuthor = stringResource(id = R.string.apm_author)
-
-                Column(modifier = Modifier.fillMaxWidth(0.8f)) {
-                    Text(
-                        text = module.name,
-                        fontSize = MaterialTheme.typography.titleMedium.fontSize,
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                        fontFamily = MaterialTheme.typography.titleMedium.fontFamily,
-                        textDecoration = textDecoration,
-                    )
-
-                    Text(
-                        text = "$moduleVersion: ${module.version}",
-                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                        textDecoration = textDecoration
-                    )
-
-                    Text(
-                        text = "$moduleAuthor: ${module.author}",
-                        fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                        fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                        textDecoration = textDecoration
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.padding(all = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Column(
+                        modifier = Modifier
+                            .alpha(alpha = alpha)
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = module.name,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 2,
+                            textDecoration = decoration,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        Text(
+                            text = "${module.version}, $moduleAuthor ${module.author}",
+                            style = MaterialTheme.typography.bodySmall,
+                            textDecoration = decoration,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     Switch(
                         enabled = !module.update,
                         checked = isChecked,
                         onCheckedChange = onCheckChanged
                     )
                 }
+
+                Text(
+                    modifier = Modifier
+                        .alpha(alpha = alpha)
+                        .padding(horizontal = 16.dp),
+                    text = module.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    textDecoration = decoration,
+                    color = MaterialTheme.colorScheme.outline
+                )
+
+                HorizontalDivider(
+                    thickness = 1.5.dp,
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (updateUrl.isNotEmpty()) {
+                        ModuleUpdateButton(onClick = { onUpdate(module) })
+
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+
+                    if (module.hasWebUi) {
+                        FilledTonalButton(
+                            onClick = { onClick(module) },
+                            enabled = true,
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                modifier = Modifier.size(20.dp),
+                                painter = painterResource(id = R.drawable.settings),
+                                contentDescription = null
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(id = R.string.apm_webui_open),
+                                maxLines = 1,
+                                overflow = TextOverflow.Visible,
+                                softWrap = false
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+                    ModuleRemoveButton(enabled = !module.remove, onClick = { onUninstall(module) })
+                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = module.description,
-                fontSize = MaterialTheme.typography.bodySmall.fontSize,
-                fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
-                lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
-                fontWeight = MaterialTheme.typography.bodySmall.fontWeight,
-                overflow = TextOverflow.Ellipsis,
-                maxLines = 4,
-                textDecoration = textDecoration
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            HorizontalDivider(thickness = Dp.Hairline)
-
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.weight(1f, true))
-
-                if (updateUrl.isNotEmpty()) {
-                    Button(
-                        modifier = Modifier
-                            .padding(0.dp)
-                            .defaultMinSize(52.dp, 32.dp),
-                        onClick = { onUpdate(module) },
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            fontFamily = MaterialTheme.typography.labelMedium.fontFamily,
-                            fontSize = MaterialTheme.typography.labelMedium.fontSize,
-                            text = stringResource(R.string.apm_update),
-                        )
-                    }
-                }
-
-                TextButton(
-                    enabled = !module.remove,
-                    onClick = { onUninstall(module) },
-                ) {
-                    Text(
-                        fontFamily = MaterialTheme.typography.labelMedium.fontFamily,
-                        fontSize = MaterialTheme.typography.labelMedium.fontSize,
-                        text = stringResource(R.string.apm_uninstall),
-                    )
-                }
-
-                if (module.hasWebUi) {
-                    TextButton(
-                        onClick = { onClick(module) },
-                    ) {
-                        Text(
-                            fontFamily = MaterialTheme.typography.labelMedium.fontFamily,
-                            fontSize = MaterialTheme.typography.labelMedium.fontSize,
-                            text = stringResource(R.string.webui_open),
-                        )
-                    }
-                }
+            if (module.remove) {
+                ModuleStateIndicator(R.drawable.trash)
+            }
+            if (module.update) {
+                ModuleStateIndicator(R.drawable.device_mobile_down)
             }
         }
     }

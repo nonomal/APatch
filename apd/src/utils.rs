@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Error, Ok, Result};
+use log::{info, warn};
+use std::ffi::CString;
 use std::{
-    fs::{create_dir_all, write, File, OpenOptions},
+    fs::{create_dir_all, File, OpenOptions},
     io::{ErrorKind::AlreadyExists, Write},
     path::Path,
 };
@@ -12,6 +14,8 @@ use std::os::unix::prelude::PermissionsExt;
 
 use crate::defs;
 use std::fs::metadata;
+
+use crate::supercall::sc_su_get_safemode;
 
 pub fn ensure_clean_dir(dir: &str) -> Result<()> {
     let path = Path::new(dir);
@@ -48,20 +52,8 @@ pub fn ensure_dir_exists<T: AsRef<Path>>(dir: T) -> Result<()> {
     }
 }
 
-pub fn ensure_binary<T: AsRef<Path>>(path: T, contents: &[u8]) -> Result<()> {
-    if path.as_ref().exists() {
-        return Ok(());
-    }
-
-    ensure_dir_exists(path.as_ref().parent().ok_or_else(|| {
-        anyhow::anyhow!(
-            "{} does not have parent directory",
-            path.as_ref().to_string_lossy()
-        )
-    })?)?;
-
-    write(&path, contents)?;
-    #[cfg(unix)]
+// todo: ensure
+pub fn ensure_binary<T: AsRef<Path>>(path: T) -> Result<()> {
     set_permissions(&path, Permissions::from_mode(0o755))?;
     Ok(())
 }
@@ -76,19 +68,28 @@ pub fn getprop(_prop: &str) -> Option<String> {
     unimplemented!()
 }
 
-pub fn is_safe_mode() -> bool {
+pub fn is_safe_mode(superkey: Option<String>) -> bool {
     let safemode = getprop("persist.sys.safemode")
         .filter(|prop| prop == "1")
         .is_some()
         || getprop("ro.sys.safemode")
             .filter(|prop| prop == "1")
             .is_some();
-    log::info!("safemode: {}", safemode);
+    info!("safemode: {}", safemode);
     if safemode {
         return true;
     }
-    let safemode = Path::new(defs::SAFEMODE_PATH).exists();
-    log::info!("kernel_safemode: {}", safemode);
+    let safemode = superkey
+        .as_ref()
+        .and_then(|key_str| CString::new(key_str.as_str()).ok())
+        .map_or_else(
+            || {
+                warn!("[is_safe_mode] No valid superkey provided, assuming safemode as false.");
+                false
+            },
+            |cstr| sc_su_get_safemode(&cstr) == 1,
+        );
+    info!("kernel_safemode: {}", safemode);
     safemode
 }
 

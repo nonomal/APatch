@@ -23,7 +23,7 @@ object KPModel {
         ANDROID_RC("android_rc");
     }
 
-    interface IExtraInfo: Parcelable {
+    interface IExtraInfo : Parcelable {
         var type: ExtraType
         var name: String
         var event: String
@@ -42,7 +42,7 @@ object KPModel {
         var license: String,
         var author: String,
         var description: String,
-    ): IExtraInfo {}
+    ) : IExtraInfo
 
     @Immutable
     @Parcelize
@@ -51,8 +51,9 @@ object KPModel {
         var version: String,
         var compileTime: String,
         var config: String,
-        var superKey: String
-    ): Parcelable {}
+        var superKey: String,
+        var rootSuperkey: String
+    ) : Parcelable
 
     @Immutable
     @Parcelize
@@ -60,6 +61,6 @@ object KPModel {
     data class KImgInfo(
         var banner: String,
         var patched: Boolean,
-    ): Parcelable {}
+    ) : Parcelable
 
 }

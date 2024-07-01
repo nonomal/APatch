@@ -54,7 +54,7 @@ mv kernel kernel.ori
 echo "- Patching kernel"
 
 set -x
-./kptools -p -i kernel.ori -s "$SUPERKEY" -k kpimg -o kernel "$@"
+./kptools -p -i kernel.ori -S "$SUPERKEY" -k kpimg -o kernel "$@"
 patch_rc=$?
 set +x
 
@@ -71,8 +71,7 @@ if [ $? -ne 0 ]; then
   exit $?
 fi
 
-# shellcheck disable=SC2039
-if [[ $FLASH_TO_DEVICE == *"true"* ]]; then
+if [ "$FLASH_TO_DEVICE" = "true" ]; then
   # flash
   if [ -b "$BOOTIMAGE" ] || [ -c "$BOOTIMAGE" ] && [ -f "new-boot.img" ]; then
     echo "- Flashing new boot image"

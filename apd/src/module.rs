@@ -330,7 +330,7 @@ fn _install_module(zip: &str) -> Result<()> {
     // print banner
     println!(include_str!("banner"));
 
-    assets::ensure_binaries().with_context(|| "Failed to extract assets")?;
+    assets::ensure_binaries().with_context(|| "binary missing")?;
 
     // first check if workding dir is usable
     ensure_dir_exists(defs::WORKING_DIR).with_context(|| "Failed to create working dir")?;
@@ -622,6 +622,12 @@ pub fn disable_module(id: &str) -> Result<()> {
 }
 
 pub fn disable_all_modules() -> Result<()> {
+    // Skip disabling modules since boot completed
+    if getprop("sys.boot_completed").as_deref() == Some("1") {
+        info!("System boot completed, no need to disable all modules");
+        return Ok(());
+    }
+
     // we assume the module dir is already mounted
     let dir = std::fs::read_dir(defs::MODULE_DIR)?;
     for entry in dir.flatten() {
