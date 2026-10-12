@@ -12,10 +12,12 @@ import com.topjohnwu.superuser.Shell;
 import com.topjohnwu.superuser.io.SuFile;
 import com.topjohnwu.superuser.io.SuFileInputStream;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.zip.GZIPInputStream;
 
 import me.bmax.apatch.util.APatchCliKt;
@@ -61,6 +63,19 @@ public final class SuFilePathHandler implements WebViewAssetLoader.PathHandler {
     private final File mDirectory;
 
     private final Shell mShell;
+    private final java.util.concurrent.atomic.AtomicBoolean mClosed = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final InsetsSupplier mInsetsSupplier;
+    @NonNull
+    private final OnInsetsRequestedListener mOnInsetsRequestedListener;
+
+    public interface InsetsSupplier {
+        @NonNull
+        Insets get();
+    }
+
+    public interface OnInsetsRequestedListener {
+        void onInsetsRequested(boolean enable);
+    }
 
     /**
      * Creates PathHandler for app's internal storage.
@@ -82,16 +97,20 @@ public final class SuFilePathHandler implements WebViewAssetLoader.PathHandler {
      * @param context {@link Context} that is used to access app's internal storage.
      * @param directory the absolute path of the exposed app internal storage directory from
      *                  which files can be loaded.
+     * @param insetsSupplier {@link InsetsSupplier} to provide window insets for styling web content.
+     * @param onInsetsRequestedListener {@link OnInsetsRequestedListener} to notify when insets are requested.
      * @throws IllegalArgumentException if the directory is not allowed.
      */
-    public SuFilePathHandler(@NonNull Context context, @NonNull File directory) {
+    public SuFilePathHandler(@NonNull Context context, @NonNull File directory, @NonNull InsetsSupplier insetsSupplier, @NonNull OnInsetsRequestedListener onInsetsRequestedListener) {
         try {
+            mInsetsSupplier = insetsSupplier;
+            mOnInsetsRequestedListener = onInsetsRequestedListener;
             mDirectory = new File(getCanonicalDirPath(directory));
             if (!isAllowedInternalStorageDir(context)) {
                 throw new IllegalArgumentException("The given directory \"" + directory
                         + "\" doesn't exist under an allowed app internal storage directory");
             }
-            mShell = APatchCliKt.createRootShell();
+            mShell = APatchCliKt.createRootShell(true);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Failed to resolve the canonical path for the given directory: "
@@ -108,6 +127,26 @@ public final class SuFilePathHandler implements WebViewAssetLoader.PathHandler {
             }
         }
         return true;
+    }
+
+    /**
+     * Release the root shell held by this handler. Must be called when the
+     * hosting WebView/Activity is destroyed, otherwise the shell process leaks.
+     * Idempotent and thread-safe: concurrent {@link #handle} calls racing with
+     * close only observe an {@link IOException} (surfaced as 404), never a crash.
+     * After close, {@link #handle} keeps returning 404.
+     */
+    public void close() {
+        if (!mClosed.compareAndSet(false, true)) {
+            return;
+        }
+        if (mShell != null) {
+            try {
+                mShell.close();
+            } catch (IOException ignored) {
+                // Best-effort: the shell is being torn down anyway.
+            }
+        }
     }
 
     /**
@@ -133,6 +172,26 @@ public final class SuFilePathHandler implements WebViewAssetLoader.PathHandler {
     @WorkerThread
     @NonNull
     public WebResourceResponse handle(@NonNull String path) {
+        if (mClosed.get()) {
+            return new WebResourceResponse(null, null, null);
+        }
+        if ("internal/insets.css".equals(path)) {
+            mOnInsetsRequestedListener.onInsetsRequested(true);
+            String css = mInsetsSupplier.get().getCss();
+            return new WebResourceResponse(
+                    "text/css",
+                    "utf-8",
+                    new ByteArrayInputStream(css.getBytes(StandardCharsets.UTF_8))
+            );
+        }
+        if ("internal/colors.css".equals(path)) {
+            String css = MonetColorsProvider.INSTANCE.getColorsCss();
+            return new WebResourceResponse(
+                    "text/css",
+                    "utf-8",
+                    new ByteArrayInputStream(css.getBytes(StandardCharsets.UTF_8))
+            );
+        }
         try {
             File file = getCanonicalFileIfChild(mDirectory, path);
             if (file != null) {

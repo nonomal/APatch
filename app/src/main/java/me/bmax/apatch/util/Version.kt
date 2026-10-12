@@ -1,10 +1,22 @@
 package me.bmax.apatch.util
 
-import com.topjohnwu.superuser.ShellUtils
+import android.util.Log
+import androidx.core.content.pm.PackageInfoCompat
 import me.bmax.apatch.APApplication
 import me.bmax.apatch.BuildConfig
 import me.bmax.apatch.Natives
 import me.bmax.apatch.apApp
+import me.bmax.apatch.util.shellForResult
+import org.ini4j.Ini
+import java.io.StringReader
+import me.bmax.apatch.ui.viewmodel.KPModel
+import com.topjohnwu.superuser.nio.ExtendedFile
+import com.topjohnwu.superuser.nio.FileSystemManager
+import com.topjohnwu.superuser.Shell
+import androidx.compose.runtime.mutableStateOf
+import java.io.File
+import android.system.Os
+
 
 /**
  * version string is like 0.9.0 or 0.9.0-dev
@@ -19,12 +31,59 @@ object Version {
         return vi.toUInt()
     }
 
+    fun getKpImg(): String {
+        val patchDir: ExtendedFile = FileSystemManager.getLocal().getFile(apApp.filesDir.parent, "check")
+        patchDir.deleteRecursively()
+        patchDir.mkdirs()
+        val execs = listOf(
+            "libkptools.so",  "libbusybox.so"
+        )
+
+        val info = apApp.applicationInfo
+        val libs = File(info.nativeLibraryDir).listFiles { _, name ->
+            execs.contains(name)
+        } ?: emptyArray()
+
+        for (lib in libs) {
+            val name = lib.name.substring(3, lib.name.length - 3)
+            Os.symlink(lib.path, "$patchDir/$name")
+        }
+
+        for (script in listOf(
+            "boot_patch.sh", "boot_unpatch.sh", "boot_extract.sh", "util_functions.sh", "kpimg"
+        )) {
+            val dest = File(patchDir, script)
+            apApp.assets.open(script).writeTo(dest)
+        }
+
+        createRootShell().use { shell ->
+            val result = shellForResult(
+                shell, "cd $patchDir", "./kptools -l -k kpimg"
+            )
+
+            if (result.isSuccess) {
+                val ini = Ini(StringReader(result.out.joinToString("\n")))
+                val kpimg = ini["kpimg"]
+                if (kpimg != null) {
+                    return kpimg["compile_time"].toString()
+                }
+            }
+        }
+
+        return "unknown"
+    }
+
     fun uInt2String(ver: UInt): String {
         return "%d.%d.%d".format(
             ver.and(0xff0000u).shr(16).toInt(),
             ver.and(0xff00u).shr(8).toInt(),
             ver.and(0xffu).toInt()
         )
+    }
+    
+    fun installedKPTime(): String {
+        val time = Natives.kernelPatchBuildTime()
+        return if (time.startsWith("ERROR_")) "读取失败" else time
     }
 
     fun buildKPVUInt(): UInt {
@@ -49,8 +108,8 @@ object Version {
 
 
     private fun installedKPatchVString(): String {
-        val result = ShellUtils.fastCmd("${APApplication.SUPERCMD} ${APApplication.superKey} " +
-                "${APApplication.KPATCH_PATH} ${APApplication.superKey} -v")
+        val resultShell = rootShellForResult("${APApplication.APD_PATH} -V")
+        val result = resultShell.out.toString()
         return result.trim().ifEmpty { "0" }
     }
 
@@ -59,24 +118,27 @@ object Version {
     }
 
     private fun installedApdVString(): String {
-        val result = ShellUtils.fastCmd("${APApplication.SUPERCMD} ${APApplication.superKey} " +
-                "${APApplication.APD_PATH} -V")
-        installedApdVString = if(result.trim().isEmpty()) "0" else {
-            Regex("\\d+").find(result)!!.value
+        val resultShell = rootShellForResult("${APApplication.APD_PATH} -V")
+        installedApdVString = if (resultShell.isSuccess) {
+            val result = resultShell.out.toString()
+            Log.i("APatch", "[installedApdVString@Version] resultFromShell: $result")
+            Regex("\\d+").find(result)?.value ?: "0"
+        } else {
+            "0"
         }
         return installedApdVString
     }
 
     fun installedApdVUInt(): Int {
-        val vstr = installedApdVString()
-        installedApdVInt = vstr.toInt()
+        installedApdVInt = installedApdVString().toInt()
         return installedApdVInt
     }
 
 
-    fun getManagerVersion(): Pair<String, Int> {
-        val packageInfo = apApp.packageManager.getPackageInfo(apApp.packageName, 0)
-        return Pair(packageInfo.versionName, packageInfo.versionCode)
+    fun getManagerVersion(): Pair<String, Long> {
+        val packageInfo = apApp.packageManager.getPackageInfo(apApp.packageName, 0)!!
+        val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
+        return Pair(packageInfo.versionName!!, versionCode)
     }
 
     var installedApdVInt: Int = 0

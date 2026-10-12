@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,18 +31,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.PatchesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.bmax.apatch.R
+import me.bmax.apatch.ui.component.WarningCard
 import me.bmax.apatch.ui.component.rememberConfirmDialog
-import me.bmax.apatch.ui.screen.destinations.PatchesDestination
 import me.bmax.apatch.ui.viewmodel.PatchesViewModel
-import me.bmax.apatch.util.DeviceUtils
+import me.bmax.apatch.util.isABDevice
+import me.bmax.apatch.util.isJailbreakMode
 import me.bmax.apatch.util.rootAvailable
 
-var selectedBootImage: Uri? = null
+// Hand-off channel from this screen to the Patches screen; a plain var would not
+// notify the LaunchedEffect consuming it there.
+var selectedBootImage by mutableStateOf<Uri?>(null)
 
-@Destination
+@Destination<RootGraph>
 @Composable
 fun InstallModeSelectScreen(navigator: DestinationsNavigator) {
     var installMethod by remember {
@@ -49,7 +60,7 @@ fun InstallModeSelectScreen(navigator: DestinationsNavigator) {
 
     Scaffold(topBar = {
         TopBar(
-            onBack = { navigator.popBackStack() },
+            onBack = dropUnlessResumed { navigator.popBackStack() },
         )
     }) {
         Column(modifier = Modifier.padding(it)) {
@@ -67,7 +78,7 @@ fun InstallModeSelectScreen(navigator: DestinationsNavigator) {
 sealed class InstallMethod {
     data class SelectFile(
         val uri: Uri? = null,
-        @StringRes override val label: Int = R.string.mode_select_page_select_file,
+        @param:StringRes override val label: Int = R.string.mode_select_page_select_file,
     ) : InstallMethod()
 
     data object DirectInstall : InstallMethod() {
@@ -90,7 +101,11 @@ private fun SelectInstallMethod(
     navigator: DestinationsNavigator
 ) {
     val rootAvailable = rootAvailable()
-    val isAbDevice = DeviceUtils.isABDevice()
+    val isAbDevice = isABDevice()
+    var jailbreakBlocked by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        jailbreakBlocked = withContext(Dispatchers.IO) { isJailbreakMode() }
+    }
 
     val radioOptions =
         mutableListOf<InstallMethod>(InstallMethod.SelectFile())
@@ -149,8 +164,26 @@ private fun SelectInstallMethod(
     }
 
     Column {
-        radioOptions.forEach { option ->
-            Row(verticalAlignment = Alignment.CenterVertically,
+        if (jailbreakBlocked) {
+            Box(Modifier.padding(12.dp)) {
+                WarningCard(
+                    message = stringResource(R.string.jailbreak_no_patch),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+        }
+        if (!rootAvailable) {
+            Box(Modifier.padding(12.dp)) {
+                WarningCard(
+                    message = stringResource(R.string.home_install_unknown_summary),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+        }
+        if (!jailbreakBlocked) {
+            radioOptions.forEach { option ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
@@ -177,6 +210,7 @@ private fun SelectInstallMethod(
                 }
             }
         }
+        }
     }
 }
 
@@ -190,5 +224,5 @@ private fun TopBar(onBack: () -> Unit = {}) {
                 onClick = onBack
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null) }
         },
-        )
+    )
 }

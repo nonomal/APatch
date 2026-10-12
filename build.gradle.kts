@@ -1,78 +1,51 @@
-import com.android.build.api.dsl.ApplicationDefaultConfig
-import com.android.build.api.dsl.CommonExtension
-import com.android.build.gradle.api.AndroidBasePlugin
-import java.io.ByteArrayOutputStream
-
 plugins {
     alias(libs.plugins.agp.app) apply false
-    alias(libs.plugins.agp.lib) apply false
     alias(libs.plugins.kotlin) apply false
-    alias(libs.plugins.lsplugin.cmaker)
+    alias(libs.plugins.kotlin.compose.compiler) apply false
 }
 
-cmaker {
-    default {
-        arguments.addAll(
-            arrayOf(
-                "-DANDROID_STL=c++_static",
-            )
-        )
-        val flags = arrayOf(
-            "-Wno-gnu-string-literal-operator-template",
-            "-Wno-c++2b-extensions",
-        )
-        cFlags.addAll(flags)
-        cppFlags.addAll(flags)
-        abiFilters("arm64-v8a")
-    }
-    buildTypes {
-        if (it.name == "release") {
-            arguments += "-DDEBUG_SYMBOLS_PATH=${buildDir.absolutePath}/symbols"
-        }
-    }
-}
+// app/src/main/cpp/version is the single source of the KernelPatch version;
+// apd/build.rs derives its copy from it as well.
+project.ext.set("kernelPatchVersion", getKernelPatchVersion())
 
-project.ext.set("kernelPatchVersion", "0.10.5-dev")
-
-val androidMinSdkVersion = 26
-val androidTargetSdkVersion = 34
-val androidCompileSdkVersion = 34
-
-val androidCompileNdkVersion = "25.2.9519653"
-
-val androidSourceCompatibility = JavaVersion.VERSION_17
-val androidTargetCompatibility = JavaVersion.VERSION_17
-
-val managerVersionCode by extra(getVersionCode())
-val managerVersionName by extra(getVersionName())
-
-
-tasks.register<Delete>("clean") {
-    delete(rootProject.buildDir)
-}
+extra.set("androidMinSdkVersion", 26)
+extra.set("androidTargetSdkVersion", 36)
+extra.set("androidCompileSdkVersion", 37)
+extra.set("androidBuildToolsVersion", "36.1.0")
+extra.set("androidCompileNdkVersion", "29.0.14206865")
+extra.set("managerVersionCode", getVersionCode())
+extra.set("managerVersionName", getVersionName())
+extra.set("branchName", getBranch())
+fun Project.exec(command: String) = providers.exec {
+    commandLine(command.split(" "))
+}.standardOutput.asText.get().trim()
 
 fun getGitCommitCount(): Int {
-    val out = ByteArrayOutputStream()
-    exec {
-        commandLine("git", "rev-list", "--count", "HEAD")
-        standardOutput = out
-    }
-    return out.toString().trim().toInt()
+    return exec("git rev-list --count HEAD").trim().toInt()
 }
 
 fun getGitDescribe(): String {
-    val out = ByteArrayOutputStream()
-    exec {
-        commandLine("git", "describe", "--tags", "--always")
-        standardOutput = out
-    }
-    return out.toString().trim()
+    return exec("git rev-parse --verify --short HEAD").trim()
 }
 
 fun getVersionCode(): Int {
-    val commitCount = getGitCommitCount()
-    val major = 1
-    return major * 10000 + commitCount + 200
+    val props = java.util.Properties().apply {
+        File(rootDir, "version.properties").inputStream().use { load(it) }
+    }
+    val epoch = props.getProperty("managerVersionEpoch").toInt()
+    return epoch + getGitCommitCount()
+}
+
+fun getKernelPatchVersion(): String {
+    val header = File(rootDir, "app/src/main/cpp/version").readText()
+    fun part(name: String) = Regex("""#define $name (\d+)""")
+        .find(header)?.groupValues?.get(1)
+        ?: error("$name not found in app/src/main/cpp/version")
+    return "${part("MAJOR")}.${part("MINOR")}.${part("PATCH")}"
+}
+
+fun getBranch(): String {
+    return exec("git rev-parse --abbrev-ref HEAD").trim()
 }
 
 fun getVersionName(): String {
@@ -81,35 +54,7 @@ fun getVersionName(): String {
 
 tasks.register("printVersion") {
     doLast {
-        println("Version code: $managerVersionCode")
-        println("Version name: $managerVersionName")
-    }
-}
-
-subprojects {
-    plugins.withType(AndroidBasePlugin::class.java) {
-        extensions.configure(CommonExtension::class.java) {
-            compileSdk = androidCompileSdkVersion
-            ndkVersion = androidCompileNdkVersion
-
-            defaultConfig {
-                minSdk = androidMinSdkVersion
-                if (this is ApplicationDefaultConfig) {
-                    targetSdk = androidTargetSdkVersion
-                    versionCode = managerVersionCode
-                    versionName = managerVersionName
-                }
-            }
-
-            lint {
-                abortOnError = true
-                checkReleaseBuilds = false
-            }
-
-            compileOptions {
-                sourceCompatibility = androidSourceCompatibility
-                targetCompatibility = androidTargetCompatibility
-            }
-        }
+        println("Version code: ${project.extra["managerVersionCode"]}")
+        println("Version name: ${project.extra["managerVersionName"]}")
     }
 }

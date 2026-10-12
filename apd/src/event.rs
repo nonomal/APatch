@@ -1,113 +1,129 @@
-use anyhow::{bail, Context, Result};
+use crate::sepolicy::get_policy_main;
+use anyhow::{Context, Result};
+use libc::SIGPWR;
 use log::{info, warn};
-use std::env;
-use std::{collections::HashMap, path::Path};
-
-use crate::module::prune_modules;
-use crate::{
-    assets, defs, mount, restorecon,
-    utils::{self, ensure_clean_dir},
+use notify::{
+    Config, Event, EventKind, INotifyWatcher, RecursiveMode, Watcher,
+    event::{ModifyKind, RenameMode},
+};
+use signal_hook::{consts::signal::*, iterator::Signals};
+use std::{
+    env, fs,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
 };
 
-fn mount_partition(partition_name: &str, lowerdir: &Vec<String>) -> Result<()> {
-    if lowerdir.is_empty() {
-        warn!("partition: {partition_name} lowerdir is empty");
-        return Ok(());
+use crate::{
+    assets, defs, lua, metamodule, module, restorecon, supercall,
+    supercall::{init_load_su_path, refresh_ap_package_list},
+    utils::{self, switch_cgroups},
+};
+
+pub fn report_kernel(superkey: Option<String>, event: &str, state: &str) {
+    let args = [
+        superkey.unwrap_or("su".to_string()),
+        "event".to_string(),
+        event.to_string(),
+        state.to_string(),
+    ];
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    // Best-effort notification to the kernel; a failed report must not abort
+    // boot stages such as post-fs-data.
+    if let Err(e) = utils::run_command("truncate", &args_ref, None)
+        .and_then(|mut child| child.wait().map_err(anyhow::Error::from))
+    {
+        warn!("report kernel event {event}/{state} failed: {e}");
     }
-
-    let partition = format!("/{partition_name}");
-
-    // if /partition is a symlink and linked to /system/partition, then we don't need to overlay it separately
-    if Path::new(&partition).read_link().is_ok() {
-        warn!("partition: {partition} is a symlink");
-        return Ok(());
-    }
-
-    let mut workdir = None;
-    let mut upperdir = None;
-    let system_rw_dir = Path::new(defs::SYSTEM_RW_DIR);
-    if system_rw_dir.exists() {
-        workdir = Some(system_rw_dir.join(partition_name).join("workdir"));
-        upperdir = Some(system_rw_dir.join(partition_name).join("upperdir"));
-    }
-
-    mount::mount_overlay(&partition, lowerdir, workdir, upperdir)
 }
 
-pub fn mount_systemlessly(module_dir: &str) -> Result<()> {
-    // construct overlay mount params
-    let dir = std::fs::read_dir(module_dir);
-    let Ok(dir) = dir else {
-        bail!("open {} failed", defs::MODULE_DIR);
-    };
-
-    let mut system_lowerdir: Vec<String> = Vec::new();
-
-    let partition = vec!["vendor", "product", "system_ext", "odm", "oem"];
-    let mut partition_lowerdir: HashMap<String, Vec<String>> = HashMap::new();
-    for ele in &partition {
-        partition_lowerdir.insert((*ele).to_string(), Vec::new());
-    }
-
-    for entry in dir.flatten() {
-        let module = entry.path();
-        if !module.is_dir() {
-            continue;
-        }
-        let disabled = module.join(defs::DISABLE_FILE_NAME).exists();
-        if disabled {
-            info!("module: {} is disabled, ignore!", module.display());
-            continue;
-        }
-        let skip_mount = module.join(defs::SKIP_MOUNT_FILE_NAME).exists();
-        if skip_mount {
-            info!("module: {} skip_mount exist, skip!", module.display());
-            continue;
-        }
-
-        let module_system = Path::new(&module).join("system");
-        if module_system.is_dir() {
-            system_lowerdir.push(format!("{}", module_system.display()));
-        }
-
-        for part in &partition {
-            // if /partition is a mountpoint, we would move it to $MODPATH/$partition when install
-            // otherwise it must be a symlink and we don't need to overlay!
-            let part_path = Path::new(&module).join(part);
-            if part_path.is_dir() {
-                if let Some(v) = partition_lowerdir.get_mut(*part) {
-                    v.push(format!("{}", part_path.display()));
-                }
-            }
-        }
-    }
-
-    // mount /system first
-    if let Err(e) = mount_partition("system", &system_lowerdir) {
-        warn!("mount system failed: {:#}", e);
-    }
-
-    // mount other partitions
-    for (k, v) in partition_lowerdir {
-        if let Err(e) = mount_partition(&k, &v) {
-            warn!("mount {k} failed: {:#}", e);
-        }
-    }
-
-    Ok(())
-}
-
-pub fn on_post_data_fs() -> Result<()> {
-
+pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     utils::umask(0);
-
+    report_kernel(superkey.clone(), "post-fs-data", "before");
+    use std::process::Stdio;
     #[cfg(unix)]
-    let _ = catch_bootlog();
+    init_load_su_path(&superkey);
+
+    let mut sepol = get_policy_main(&["magiskpolicy".to_string(), "--live".to_string()])?;
+    sepol.magisk_rules();
+    sepol
+        .to_file("/sys/fs/selinux/load")
+        .context("Cannot apply policy")?;
+
+    info!("Re-privilege apd profile after injecting sepolicy");
+    supercall::privilege_apd_profile(&superkey);
+
+    // Clear all temporary module configs early
+    if let Err(e) = crate::module_config::clear_all_temp_configs() {
+        warn!("clear temp configs failed: {e}");
+    }
 
     if utils::has_magisk() {
         warn!("Magisk detected, skip post-fs-data!");
+        report_kernel(superkey.clone(), "post-fs-data", "after");
         return Ok(());
     }
+
+    // Create log environment
+    if !Path::new(defs::APATCH_LOG_FOLDER).exists() {
+        fs::create_dir(defs::APATCH_LOG_FOLDER).expect("Failed to create log folder");
+        let permissions = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(defs::APATCH_LOG_FOLDER, permissions)
+            .expect("Failed to set permissions");
+    }
+    let command_string = format!(
+        "rm -rf {}*.old.log; for file in {}*; do mv \"$file\" \"$file.old.log\"; done",
+        defs::APATCH_LOG_FOLDER,
+        defs::APATCH_LOG_FOLDER
+    );
+    let mut args = vec!["-c", &command_string];
+    // for all file to .old
+    let result = utils::run_command("sh", &args, None)?.wait()?;
+    if result.success() {
+        info!("Successfully deleted .old files.");
+    } else {
+        info!("Failed to delete .old files.");
+    }
+    let logcat_path = format!("{}logcat.log", defs::APATCH_LOG_FOLDER);
+    let dmesg_path = format!("{}dmesg.log", defs::APATCH_LOG_FOLDER);
+    let bootlog = fs::File::create(dmesg_path)?;
+    args = vec![
+        "-s",
+        "9",
+        "45s",
+        "logcat",
+        "-b",
+        "main,system,crash",
+        "DrmLibFs:S",
+        "-f",
+        &logcat_path,
+        "logcatcher-bootlog:S",
+    ];
+    let _ = unsafe {
+        Command::new("timeout")
+            .process_group(0)
+            .pre_exec(|| {
+                switch_cgroups();
+                Ok(())
+            })
+            .args(args)
+            .spawn()
+    };
+    args = vec!["-s", "9", "120s", "dmesg", "-w"];
+    let _result = unsafe {
+        Command::new("timeout")
+            .process_group(0)
+            .pre_exec(|| {
+                switch_cgroups();
+                Ok(())
+            })
+            .args(args)
+            .stdout(Stdio::from(bootlog))
+            .spawn()
+    };
 
     let key = "KERNELPATCH_VERSION";
     match env::var(key) {
@@ -121,66 +137,43 @@ pub fn on_post_data_fs() -> Result<()> {
         Err(_) => println!("{} not found", key),
     }
 
-    let safe_mode = crate::utils::is_safe_mode();
+    let safe_mode = utils::is_safe_mode(superkey.clone());
 
     if safe_mode {
         // we should still mount modules.img to `/data/adb/modules` in safe mode
         // becuase we may need to operate the module dir in safe mode
         warn!("safe mode, skip common post-fs-data.d scripts");
+        // Not redundant with the disable below: ensure_binaries /
+        // handle_updated_modules can still fail with `?` before reaching it,
+        // and returning early with modules left enabled risks a bootloop.
+        if let Err(e) = module::disable_all_modules() {
+            warn!("disable all modules failed: {}", e);
+        }
     } else {
         // Then exec common post-fs-data scripts
-        if let Err(e) = crate::module::exec_common_scripts("post-fs-data.d", true) {
+        if let Err(e) = module::exec_common_scripts("post-fs-data.d", true) {
             warn!("exec common post-fs-data scripts failed: {}", e);
         }
     }
+    let module_update_dir = defs::MODULE_UPDATE_DIR; //save module place
+    let module_dir = defs::MODULE_DIR; // run modules place
+    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME); // if update ,there will be renewed modules file
+    assets::ensure_binaries().with_context(|| "binary missing")?;
 
-    let module_update_img = defs::MODULE_UPDATE_IMG;
-    let module_img = defs::MODULE_IMG;
-    let module_dir = defs::MODULE_DIR;
-    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME);
-
-    // modules.img is the default image
-    let mut target_update_img = &module_img;
-
-    // we should clean the module mount point if it exists
-    ensure_clean_dir(module_dir)?;
-
-    assets::ensure_binaries().with_context(|| "Failed to extract bin assets")?;
-
-    if Path::new(module_update_img).exists() {
-        if module_update_flag.exists() {
-            // if modules_update.img exists, and the the flag indicate this is an update
-            // this make sure that if the update failed, we will fallback to the old image
-            // if we boot succeed, we will rename the modules_update.img to modules.img #on_boot_complete
-            target_update_img = &module_update_img;
-            // And we should delete the flag immediately
-            std::fs::remove_file(module_update_flag)?;
-        } else {
-            // if modules_update.img exists, but the flag not exist, we should delete it
-            std::fs::remove_file(module_update_img)?;
-        }
+    if Path::new(defs::MODULE_UPDATE_DIR).exists() {
+        module::handle_updated_modules()?;
+        fs::remove_dir_all(module_update_dir)?;
     }
 
-    if !Path::new(target_update_img).exists() {
-        return Ok(());
-    }
-
-    // we should always mount the module.img to module dir
-    // becuase we may need to operate the module dir in safe mode
-    info!("mount module image: {target_update_img} to {module_dir}");
-    mount::AutoMountExt4::try_new(target_update_img, module_dir, false)
-        .with_context(|| "mount module image failed".to_string())?;
-
-    // if we are in safe mode, we should disable all modules
     if safe_mode {
         warn!("safe mode, skip post-fs-data scripts and disable all modules!");
-        if let Err(e) = crate::module::disable_all_modules() {
+        if let Err(e) = module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
         }
         return Ok(());
     }
 
-    if let Err(e) = prune_modules() {
+    if let Err(e) = module::prune_modules() {
         warn!("prune modules failed: {}", e);
     }
 
@@ -189,38 +182,38 @@ pub fn on_post_data_fs() -> Result<()> {
     }
 
     // load sepolicy.rule
-    if crate::module::load_sepolicy_rule().is_err() {
+    if module::load_sepolicy_rule().is_err() {
         warn!("load sepolicy.rule failed");
     }
-    
-    if let Err(e) = mount::mount_tmpfs(utils::get_tmp_path()) {
-        warn!("do temp dir mount failed: {}", e);
+
+    if let Err(e) = metamodule::exec_mount_script(module_dir) {
+        warn!("execute metamodule mount failed: {e}");
     }
 
     // exec modules post-fs-data scripts
     // TODO: Add timeout
-    if let Err(e) = crate::module::exec_stage_script("post-fs-data", true) {
+    if let Err(e) = module::exec_stage_script("post-fs-data", true) {
         warn!("exec post-fs-data scripts failed: {}", e);
     }
-
+    if let Err(e) = lua::exec_stage_lua("post-fs-data", true, superkey.as_deref().unwrap_or("")) {
+        warn!("Failed to exec post-fs-data lua: {}", e);
+    }
     // load system.prop
-    if let Err(e) = crate::module::load_system_prop() {
+    if let Err(e) = module::load_system_prop() {
         warn!("load system.prop failed: {}", e);
     }
 
-    // mount module systemlessly by overlay
-    if let Err(e) = mount_systemlessly(module_dir) {
-        warn!("do systemless mount failed: {}", e);
-    }
+    info!("remove update flag");
+    let _ = fs::remove_file(module_update_flag);
 
-    run_stage("post-mount", true);
+    run_stage("post-mount", superkey.clone(), true);
 
-    std::env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
-
+    env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
+    report_kernel(superkey, "post-fs-data", "after");
     Ok(())
 }
 
-fn run_stage(stage: &str, block: bool) {
+fn run_stage(stage: &str, superkey: Option<String>, block: bool) {
     utils::umask(0);
 
     if utils::has_magisk() {
@@ -228,81 +221,171 @@ fn run_stage(stage: &str, block: bool) {
         return;
     }
 
-    if crate::utils::is_safe_mode() {
+    if utils::is_safe_mode(superkey.clone()) {
         warn!("safe mode, skip {stage} scripts");
+        if let Err(e) = module::disable_all_modules() {
+            warn!("disable all modules failed: {}", e);
+        }
         return;
     }
 
-    if let Err(e) = crate::module::exec_common_scripts(&format!("{stage}.d"), block) {
+    // execute metamodule stage script first (priority)
+    if let Err(e) = metamodule::exec_stage_script(stage, block) {
+        warn!("Failed to exec metamodule {stage} script: {e}");
+    }
+
+    if let Err(e) = module::exec_common_scripts(&format!("{stage}.d"), block) {
         warn!("Failed to exec common {stage} scripts: {e}");
     }
-    if let Err(e) = crate::module::exec_stage_script(stage, block) {
+    if let Err(e) = module::exec_stage_script(stage, block) {
         warn!("Failed to exec {stage} scripts: {e}");
+    }
+    if let Err(e) = lua::exec_stage_lua(stage, block, superkey.as_deref().unwrap_or("")) {
+        warn!("Failed to exec {stage} lua: {e}");
     }
 }
 
-pub fn on_services() -> Result<()> {
+pub fn on_services(superkey: Option<String>) -> Result<()> {
     info!("on_services triggered!");
-    run_stage("service", false);
+    run_stage("service", superkey, false);
 
     Ok(())
 }
 
-pub fn on_boot_completed() -> Result<()> {
+fn run_uid_monitor() {
+    info!("Trigger run_uid_monitor!");
+
+    let mut command = &mut Command::new("/data/adb/apd");
+    {
+        command = command.process_group(0);
+        command = unsafe {
+            command.pre_exec(|| {
+                // ignore the error?
+                switch_cgroups();
+                Ok(())
+            })
+        };
+    }
+    command = command.arg("uid-listener");
+
+    command
+        .spawn()
+        .map(|_| ())
+        .expect("[run_uid_monitor] Failed to run uid monitor");
+}
+
+pub fn on_boot_completed(superkey: Option<String>) -> Result<()> {
     info!("on_boot_completed triggered!");
-    let module_update_img = Path::new(defs::MODULE_UPDATE_IMG);
-    let module_img = Path::new(defs::MODULE_IMG);
-    if module_update_img.exists() {
-        // this is a update and we successfully booted
-        if std::fs::rename(module_update_img, module_img).is_err() {
-            warn!("Failed to rename images, copy it now.",);
-            std::fs::copy(module_update_img, module_img)
-                .with_context(|| "Failed to copy images")?;
-            std::fs::remove_file(module_update_img).with_context(|| "Failed to remove image!")?;
+
+    run_stage("boot-completed", superkey, false);
+
+    run_uid_monitor();
+    Ok(())
+}
+
+pub fn start_uid_listener() -> Result<()> {
+    info!("start_uid_listener triggered!");
+    println!("[start_uid_listener] Registering...");
+
+    // create inotify instance
+    const SYS_PACKAGES_LIST_TMP: &str = "/data/system/packages.list.tmp";
+    let sys_packages_list_tmp = PathBuf::from(&SYS_PACKAGES_LIST_TMP);
+    let dir: PathBuf = sys_packages_list_tmp.parent().unwrap().into();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx_clone = tx.clone();
+    let mutex = Arc::new(Mutex::new(()));
+
+    {
+        let mutex_clone = mutex.clone();
+        thread::spawn(move || {
+            let mut signals = Signals::new([SIGTERM, SIGINT, SIGPWR]).unwrap();
+            if let Some(sig) = signals.forever().next() {
+                log::warn!("[shutdown] Caught signal {sig}, refreshing package list...");
+                let skey = c"su";
+                refresh_ap_package_list(skey, &mutex_clone);
+            }
+        });
+    }
+
+    let mut watcher = INotifyWatcher::new(
+        move |ev: notify::Result<Event>| match ev {
+            Ok(Event {
+                kind: EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+                paths,
+                ..
+            }) => {
+                if paths.contains(&sys_packages_list_tmp) {
+                    info!("[uid_monitor] System packages list changed, sending to tx...");
+                    tx_clone.send(false).unwrap()
+                }
+            }
+            Err(err) => warn!("inotify error: {err}"),
+            _ => (),
+        },
+        Config::default(),
+    )?;
+
+    watcher.watch(dir.as_ref(), RecursiveMode::NonRecursive)?;
+
+    let mut debounce = false;
+    while let Ok(delayed) = rx.recv() {
+        if delayed {
+            debounce = false;
+            let skey = c"su";
+            refresh_ap_package_list(skey, &mutex);
+            report_kernel(None, "uid_listener", "package-list-updated");
+        } else if !debounce {
+            thread::sleep(Duration::from_secs(1));
+            debounce = true;
+            tx.send(true)?;
         }
     }
 
-    run_stage("boot-completed", false);
-
     Ok(())
 }
 
+/// Emulate a system reboot: restart the Android framework (`stop` / `start`)
+/// and re-apply the service stage. Used by jailbreak mode so that a runtime-loaded
+/// `kernelpatch.ko` stays active (a full reboot would drop it).
+pub fn soft_reboot(superkey: Option<String>) -> Result<()> {
+    use std::process::Command;
 
-#[cfg(unix)]
-fn catch_bootlog() -> Result<()> {
-    use std::os::unix::process::CommandExt;
-    use std::process::Stdio;
+    // Detach from the caller (app root shell) first: `stop` tears down the
+    // framework including the app/zygote tree this process was spawned from, so
+    // without daemonizing the `start` below would never be reached.
+    utils::daemonize()?;
 
-    let logdir = Path::new(defs::LOG_DIR);
-    utils::ensure_dir_exists(logdir)?;
-    let aptchlog = logdir.join("apatch.log");
-    let oldapatchlog = logdir.join("apatch.old.log");
+    info!("emulating soft reboot!");
+    utils::switch_mnt_ns(1)?;
+    std::env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
 
-    if aptchlog.exists() {
-        std::fs::rename(&aptchlog, oldapatchlog)?;
+    if let Err(e) = crate::resetprop::set_prop("sys.boot_completed", "0") {
+        warn!("reset boot completed failed: {e}");
     }
 
-    let aptchlog = std::fs::File::create(aptchlog)?;
-
-    // timeout -s 9 30s logcat > apatch.log
-    let result = unsafe {
-        std::process::Command::new("timeout")
-            .process_group(0)
-            .pre_exec(|| {
-                utils::switch_cgroups();
-                Ok(())
-            })
-            .arg("-s")
-            .arg("9")
-            .arg("30s")
-            .arg("logcat")
-            .stdout(Stdio::from(aptchlog))
-            .spawn()
-    };
-
-    if let Err(e) = result {
-        warn!("Failed to start logcat: {:#}", e);
+    info!("stop");
+    let status = Command::new("stop").status().context("stop failed")?;
+    if !status.success() {
+        warn!("stop exited with status: {status}");
     }
+
+    info!("post-fs-data");
+    // Never abort the soft reboot here: the framework must always be restarted.
+    // The daemonized stdin (dev null) keeps the supercall/truncate redirects from
+    // blocking, so re-applying the boot stages is safe.
+    if let Err(e) = on_post_data_fs(superkey.clone()) {
+        warn!("post-fs-data failed during soft reboot: {e:#}");
+    }
+
+    info!("start");
+    let status = Command::new("start").status().context("start failed")?;
+    if !status.success() {
+        warn!("start exited with status: {status}");
+    }
+
+    info!("services");
+    on_services(superkey)?;
 
     Ok(())
 }

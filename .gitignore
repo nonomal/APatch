@@ -9,3 +9,7 @@ captures
 key.jks
 key.jks.base64.txt
 .vscode
+.kotlin
+app/src/main/resources/
+private
+.claude

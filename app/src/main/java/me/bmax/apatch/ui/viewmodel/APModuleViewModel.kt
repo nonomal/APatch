@@ -9,13 +9,16 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import me.bmax.apatch.apApp
+import me.bmax.apatch.util.HanziToPinyin
 import me.bmax.apatch.util.listModules
-import me.bmax.apatch.util.overlayFsAvailable
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.Collator
-import java.util.*
+import java.util.Locale
 
 class APModuleViewModel : ViewModel() {
     companion object {
@@ -23,7 +26,7 @@ class APModuleViewModel : ViewModel() {
         private var modules by mutableStateOf<List<ModuleInfo>>(emptyList())
     }
 
-    class ModuleInfo(
+    data class ModuleInfo(
         val id: String,
         val name: String,
         val author: String,
@@ -35,6 +38,12 @@ class APModuleViewModel : ViewModel() {
         val remove: Boolean,
         val updateJson: String,
         val hasWebUi: Boolean,
+        val hasActionScript: Boolean,
+        val metamodule: Boolean,
+        val updateInfo: ModuleUpdateInfo? = null,
+        // Pinyin of `name`, precomputed at load time; per-keystroke conversion in
+        // the search filter dropped frames on the main thread.
+        val pinyin: String = "",
     )
 
     data class ModuleUpdateInfo(
@@ -44,17 +53,20 @@ class APModuleViewModel : ViewModel() {
         val changelog: String,
     )
 
+    var search by mutableStateOf("")
     var isRefreshing by mutableStateOf(false)
         private set
 
-    var isOverlayAvailable by mutableStateOf(overlayFsAvailable())
-        private set
+    private val collator = Collator.getInstance(Locale.getDefault())
 
     val moduleList by derivedStateOf {
-        val comparator = compareBy(Collator.getInstance(Locale.getDefault()), ModuleInfo::id)
-        modules.sortedWith(comparator).also {
-            isRefreshing = false
-        }
+        val comparator = compareByDescending<ModuleInfo> { it.metamodule && it.enabled }
+            .thenBy(collator) { it.id }
+
+        modules.filter {
+            it.id.contains(search, true) || it.name.contains(search, true) ||
+                it.pinyin.contains(search, true)
+        }.sortedWith(comparator)
     }
 
     var isNeedRefresh by mutableStateOf(false)
@@ -68,12 +80,9 @@ class APModuleViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             isRefreshing = true
 
-            val oldModuleList = modules
-
             val start = SystemClock.elapsedRealtime()
 
             kotlin.runCatching {
-                isOverlayAvailable = overlayFsAvailable()
 
                 val result = listModules()
 
@@ -84,10 +93,11 @@ class APModuleViewModel : ViewModel() {
                     .asSequence()
                     .map { array.getJSONObject(it) }
                     .map { obj ->
+                        val name = obj.optString("name")
                         ModuleInfo(
                             obj.getString("id"),
 
-                            obj.optString("name"),
+                            name,
                             obj.optString("author", "Unknown"),
                             obj.optString("version", "Unknown"),
                             obj.optInt("versionCode", 0),
@@ -96,18 +106,27 @@ class APModuleViewModel : ViewModel() {
                             obj.getBoolean("update"),
                             obj.getBoolean("remove"),
                             obj.optString("updateJson"),
-                            obj.optBoolean("web")
+                            obj.getBooleanCompat("web"),
+                            obj.getBooleanCompat("action"),
+                            obj.getBooleanCompat("metamodule"),
+                            pinyin = HanziToPinyin.getInstance().toPinyinString(name) ?: ""
                         )
                     }.toList()
                 isNeedRefresh = false
+                isRefreshing = false
+
+                // One network round trip per enabled module; running them
+                // concurrently makes the total latency the slowest response
+                // instead of the sum of all responses.
+                modules = modules.map { module ->
+                    async {
+                        if (module.enabled && module.updateJson.isNotEmpty() && !module.update && !module.remove) {
+                            module.copy(updateInfo = runCatching { checkUpdate(module) }.getOrNull())
+                        } else module
+                    }
+                }.awaitAll()
             }.onFailure { e ->
                 Log.e(TAG, "fetchModuleList: ", e)
-                isRefreshing = false
-            }
-
-            // when both old and new is kotlin.collections.EmptyList
-            // moduleList update will don't trigger
-            if (oldModuleList === modules) {
                 isRefreshing = false
             }
 
@@ -115,16 +134,19 @@ class APModuleViewModel : ViewModel() {
         }
     }
 
-    fun checkUpdate(m: ModuleInfo): Triple<String, String, String> {
-        val empty = Triple("", "", "")
+    private fun sanitizeVersionString(version: String): String {
+        return version.replace(Regex("[^a-zA-Z0-9.\\-_]"), "_")
+    }
+
+    fun checkUpdate(m: ModuleInfo): ModuleUpdateInfo? {
         if (m.updateJson.isEmpty() || m.remove || m.update || !m.enabled) {
-            return empty
+            return null
         }
         // download updateJson
         val result = kotlin.runCatching {
             val url = m.updateJson
             Log.i(TAG, "checkUpdate url: $url")
-            val response = okhttp3.OkHttpClient()
+            val response = apApp.okhttpClient
                 .newCall(
                     okhttp3.Request.Builder()
                         .url(url)
@@ -140,21 +162,32 @@ class APModuleViewModel : ViewModel() {
         Log.i(TAG, "checkUpdate result: $result")
 
         if (result.isEmpty()) {
-            return empty
+            return null
         }
 
         val updateJson = kotlin.runCatching {
             JSONObject(result)
-        }.getOrNull() ?: return empty
+        }.getOrNull() ?: return null
 
-        val version = updateJson.optString("version", "")
+        val version = sanitizeVersionString(updateJson.optString("version", ""))
         val versionCode = updateJson.optInt("versionCode", 0)
         val zipUrl = updateJson.optString("zipUrl", "")
         val changelog = updateJson.optString("changelog", "")
         if (versionCode <= m.versionCode || zipUrl.isEmpty()) {
-            return empty
+            return null
         }
 
-        return Triple(zipUrl, version, changelog)
+        return ModuleUpdateInfo(version, versionCode, zipUrl, changelog)
+    }
+}
+
+private fun JSONObject.getBooleanCompat(key: String, default: Boolean = false): Boolean {
+    if (!has(key)) return default
+    return when (val value = opt(key)) {
+        null -> default
+        is Boolean -> value
+        is String -> value.equals("true", ignoreCase = true) || value == "1"
+        is Number -> value.toInt() != 0
+        else -> default
     }
 }

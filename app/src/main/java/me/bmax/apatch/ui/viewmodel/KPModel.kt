@@ -23,7 +23,7 @@ object KPModel {
         ANDROID_RC("android_rc");
     }
 
-    interface IExtraInfo: Parcelable {
+    interface IExtraInfo : Parcelable {
         var type: ExtraType
         var name: String
         var event: String
@@ -42,7 +42,27 @@ object KPModel {
         var license: String,
         var author: String,
         var description: String,
-    ): IExtraInfo {}
+        /** Directory name used by the file-backed KPM store. */
+        var moduleId: String = "",
+        /** file, embedded, or empty when the kernel did not report a source. */
+        var loadSource: String = "",
+        var installed: Boolean = false,
+        var disabled: Boolean = false,
+        /**
+         * Version reported by the persisted file, which differs from [version]
+         * while a loaded module has not been reloaded since the file changed.
+         */
+        var storedVersion: String = "",
+    ) : IExtraInfo
+
+    /** A newer release the repository offers for an installed KPM. */
+    @Immutable
+    @Keep
+    data class KpmUpdateInfo(
+        val version: String,
+        /** The address the module document names; the repository relay backs it up. */
+        val authorUrl: String = "",
+    )
 
     @Immutable
     @Parcelize
@@ -51,8 +71,9 @@ object KPModel {
         var version: String,
         var compileTime: String,
         var config: String,
-        var superKey: String
-    ): Parcelable {}
+        var superKey: String,
+        var rootSuperkey: String
+    ) : Parcelable
 
     @Immutable
     @Parcelize
@@ -60,6 +81,6 @@ object KPModel {
     data class KImgInfo(
         var banner: String,
         var patched: Boolean,
-    ): Parcelable {}
+    ) : Parcelable
 
 }

@@ -1,18 +1,27 @@
-import com.android.build.gradle.internal.api.BaseVariantOutputImpl
-import org.jetbrains.kotlin.de.undercouch.gradle.tasks.download.Download
+@file:Suppress("UnstableApiUsage")
+
+import com.android.build.gradle.tasks.PackageApplication
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
 
 plugins {
     alias(libs.plugins.agp.app)
-    alias(libs.plugins.kotlin)
+    alias(libs.plugins.kotlin.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.lsplugin.apksign)
     alias(libs.plugins.lsplugin.resopt)
     id("kotlin-parcelize")
 }
 
-val managerVersionCode: Int by rootProject.extra
-val managerVersionName: String by rootProject.extra
-val kernelPatchVersion: String by rootProject.extra
+val androidCompileSdkVersion: Int = rootProject.extra["androidCompileSdkVersion"] as Int
+val androidCompileNdkVersion: String = rootProject.extra["androidCompileNdkVersion"] as String
+val androidBuildToolsVersion: String = rootProject.extra["androidBuildToolsVersion"] as String
+val androidMinSdkVersion: Int = rootProject.extra["androidMinSdkVersion"] as Int
+val androidTargetSdkVersion: Int = rootProject.extra["androidTargetSdkVersion"] as Int
+val managerVersionCode: Int = rootProject.extra["managerVersionCode"] as Int
+val managerVersionName: String = rootProject.extra["managerVersionName"] as String
+val branchName: String = rootProject.extra["branchName"] as String
+val kernelPatchVersion: String = rootProject.extra["kernelPatchVersion"] as String
 
 apksign {
     storeFileProperty = "KEYSTORE_FILE"
@@ -20,6 +29,26 @@ apksign {
     keyAliasProperty = "KEY_ALIAS"
     keyPasswordProperty = "KEY_PASSWORD"
 }
+
+val ccache = System.getenv("PATH")?.split(File.pathSeparator)
+    ?.map { File(it, "ccache") }?.firstOrNull { it.exists() }?.absolutePath
+
+val baseFlags = listOf(
+    "-Wall", "-Qunused-arguments", "-fno-rtti", "-fvisibility=hidden",
+    "-fvisibility-inlines-hidden", "-fno-exceptions", "-fno-stack-protector",
+    "-fomit-frame-pointer", "-Wno-builtin-macro-redefined", "-Wno-unused-value",
+    "-D__FILE__=__FILE_NAME__",
+    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON", "-Wno-unused", "-Wno-unused-parameter",
+    "-Wno-unused-command-line-argument", "-Wno-incompatible-function-pointer-types",
+    "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"
+)
+
+val baseArgs = mutableListOf(
+    "-DANDROID_STL=none", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+    "-DCMAKE_CXX_STANDARD=23", "-DCMAKE_C_STANDARD=23",
+    "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON", "-DCMAKE_VISIBILITY_INLINES_HIDDEN=ON",
+    "-DCMAKE_CXX_VISIBILITY_PRESET=hidden", "-DCMAKE_C_VISIBILITY_PRESET=hidden"
+).apply { if (ccache != null) add("-DANDROID_CCACHE=$ccache") }
 
 android {
     namespace = "me.bmax.apatch"
@@ -29,14 +58,39 @@ android {
             isDebuggable = true
             isMinifyEnabled = false
             isShrinkResources = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DCMAKE_CXX_FLAGS_DEBUG=-Og", "-DCMAKE_C_FLAGS_DEBUG=-Og")
+                }
+            }
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = false
             multiDexEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            vcsInfo.include = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            externalNativeBuild {
+                cmake {
+                    val relFlags = listOf(
+                        "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+                        "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-Wl,--exclude-libs,ALL",
+                        "-Ofast", "-fmerge-all-constants", "-flto=full", "-ffat-lto-objects",
+                        "-fno-semantic-interposition", "-fno-threadsafe-statics"
+                    )
+                    cppFlags += relFlags
+                    cFlags += relFlags
+                    arguments += listOf("-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG", "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG")
+                }
+            }
         }
     }
 
@@ -46,18 +100,30 @@ android {
         aidl = true
         buildConfig = true
         compose = true
+        prefab = true
     }
 
     defaultConfig {
+        minSdk = androidMinSdkVersion
+        targetSdk = androidTargetSdkVersion
+        versionCode = managerVersionCode
+        versionName = managerVersionName
+        ndk.abiFilters.addAll(arrayOf("arm64-v8a"))
+        externalNativeBuild {
+            cmake {
+                cppFlags += baseFlags + "-std=c++2b"
+                cFlags += baseFlags + "-std=c2x"
+                arguments += baseArgs
+                abiFilters("arm64-v8a")
+            }
+        }
         buildConfigField("String", "buildKPV", "\"$kernelPatchVersion\"")
+        base.archivesName = "APatch_${managerVersionCode}_${managerVersionName}_${branchName}"
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     packaging {
@@ -65,15 +131,15 @@ android {
             useLegacyPackaging = true
         }
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "/META-INF/**.version"
-            excludes += "okhttp3/**"
-            excludes += "kotlin/**"
-            excludes += "/org/bouncycastle/**"
-            excludes += "org/**"
-            excludes += "**.properties"
-            excludes += "**.bin"
-            excludes += "kotlin-tooling-metadata.json"
+            excludes += "**"
+            merges += "META-INF/com/google/android/**"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            version = "3.28.0+"
+            path("src/main/cpp/CMakeLists.txt")
         }
     }
 
@@ -81,55 +147,158 @@ android {
         generateLocaleConfig = true
     }
 
-    sourceSets["main"].jniLibs.srcDir("libs")
+    compileSdk = androidCompileSdkVersion
+    ndkVersion = androidCompileNdkVersion
+    buildToolsVersion = androidBuildToolsVersion
 
-    applicationVariants.all {
-        outputs.forEach {
-            val output = it as BaseVariantOutputImpl
-            output.outputFileName = "APatch_${managerVersionName}_${managerVersionCode}-$name.apk"
-        }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 
-        kotlin.sourceSets {
-            getByName(name) {
-                kotlin.srcDir("build/generated/ksp/$name/kotlin")
+    android.sourceSets.named("main") {
+        kotlin.directories += "build/generated/ksp/$name/kotlin"
+        jniLibs.directories += "libs"
+    }
+}
+
+// https://stackoverflow.com/a/77745844
+tasks.withType<PackageApplication> {
+    doFirst { appMetadata.asFile.orNull?.writeText("") }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+kotlin {
+    jvmToolchain(21)
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_21
+    }
+}
+
+fun registerDownloadTask(
+    taskName: String, srcUrl: String, destPath: String, project: Project
+) {
+    project.tasks.register(taskName) {
+        val destFile = File(destPath)
+
+        doLast {
+            if (!destFile.exists() || isFileUpdated(srcUrl, destFile)) {
+                println(" - Downloading $srcUrl to ${destFile.absolutePath}")
+                downloadFile(srcUrl, destFile)
+                println(" - Download completed.")
+            } else {
+                println(" - File is up-to-date, skipping download.")
             }
         }
     }
 }
 
-tasks.register<Download>("downloadKpimg") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kpimg-android")
-    dest(file("${project.projectDir}/src/main/assets/kpimg"))
-    onlyIfNewer(true)
-    overwrite(true)
+fun isFileUpdated(url: String, localFile: File): Boolean {
+    val connection = URI.create(url).toURL().openConnection()
+    val remoteLastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
+    return remoteLastModified > localFile.lastModified()
 }
 
-tasks.register<Download>("downloadKpatch") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kpatch-android")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libkpatch.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+fun downloadFile(url: String, destFile: File) {
+    URI.create(url).toURL().openStream().use { input ->
+        destFile.outputStream().use { output ->
+            input.copyTo(output)
+        }
+    }
 }
 
-tasks.register<Download>("downloadKptools") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/kptools-android")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libkptools.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+/** Download with connect/read timeouts and retries (robust against flaky networks). */
+fun downloadFileRetry(url: String, destFile: File, maxRetries: Int = 5) {
+    var attempt = 0
+    while (true) {
+        try {
+            val conn = URI.create(url).toURL().openConnection()
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+            conn.getInputStream().use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        } catch (e: Exception) {
+            attempt++
+            if (attempt >= maxRetries) throw e
+            println(" - download attempt $attempt/$maxRetries failed for $url: ${e.message}")
+            Thread.sleep(2000L * attempt)
+        }
+    }
 }
 
-tasks.register<Download>("downloadApjni") {
-    src("https://github.com/bmax121/KernelPatch/releases/download/${kernelPatchVersion}/libapjni.so")
-    dest(file("${project.projectDir}/libs/arm64-v8a/libapjni.so"))
-    onlyIfNewer(true)
-    overwrite(true)
+registerDownloadTask(
+    taskName = "downloadKpimg",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
+    destPath = "${project.projectDir}/src/main/assets/kpimg",
+    project = project
+)
+
+registerDownloadTask(
+    taskName = "downloadKptools",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kptools-android",
+    destPath = "${project.projectDir}/libs/arm64-v8a/libkptools.so",
+    project = project
+)
+
+// Compat kp version less than 0.10.7
+// TODO: Remove in future
+registerDownloadTask(
+    taskName = "downloadCompatKpatch",
+    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/0.10.7/kpatch-android",
+    destPath = "${project.projectDir}/libs/arm64-v8a/libkpatch.so",
+    project = project
+)
+
+// Jailbreak mode: download KernelPatch ko for every supported kernel KMI and
+// package them into the APK assets so the app can load the matching one.
+val jailbreakKmis = listOf(
+    "android12-5.10", "android13-5.10", "android13-5.15",
+    "android14-5.15", "android14-6.1", "android15-6.6", "android16-6.12",
+)
+
+tasks.register("downloadJailbreakKo") {
+    doLast {
+        val assetsDir = File("${project.projectDir}/src/main/assets")
+        assetsDir.mkdirs()
+        jailbreakKmis.forEach { kmi ->
+            val srcUrl =
+                "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/${kmi}_kernelpatch.ko"
+            val destFile = File(assetsDir, "${kmi}_kernelpatch.ko")
+            if (!destFile.exists()) {
+                println(" - Downloading $srcUrl to ${destFile.absolutePath}")
+                downloadFileRetry(srcUrl, destFile)
+            } else {
+                println(" - $kmi kernelpatch.ko already present.")
+            }
+        }
+    }
+}
+
+tasks.register<Copy>("mergeScripts") {
+    into("${project.projectDir}/src/main/resources/META-INF/com/google/android")
+    from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
+        rename { "update-binary" }
+    }
+    from(rootProject.file("${project.rootDir}/scripts/update_script.sh")) {
+        rename { "updater-script" }
+    }
 }
 
 tasks.getByName("preBuild").dependsOn(
     "downloadKpimg",
-    "downloadKpatch",
     "downloadKptools",
-    "downloadApjni",
+    "downloadCompatKpatch",
+    "downloadJailbreakKo",
+    "mergeScripts",
 )
 
 // https://github.com/bbqsrc/cargo-ndk
@@ -168,22 +337,22 @@ tasks.clean {
     dependsOn("apdClean")
 }
 
+ksp {
+    arg("compose-destinations.defaultTransitions", "none")
+}
+
 dependencies {
+    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.webkit)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.runtime.livedata)
-    implementation(libs.androidx.webkit)
-    implementation(libs.timber)
-    implementation(libs.devappx)
-    implementation(libs.ini4j)
-    implementation(libs.bcpkix)
+    implementation(libs.androidx.compose.runtime.livedata)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
@@ -192,11 +361,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    implementation(libs.com.google.accompanist.drawablepainter)
-    implementation(libs.com.google.accompanist.navigation.animation)
-    implementation(libs.com.google.accompanist.systemuicontroller)
-
-    implementation(libs.compose.destinations.animations.core)
+    implementation(libs.compose.destinations.core)
     ksp(libs.compose.destinations.ksp)
 
     implementation(libs.com.github.topjohnwu.libsu.core)
@@ -206,16 +371,15 @@ dependencies {
 
     implementation(libs.dev.rikka.rikkax.parcelablelist)
 
-    implementation(libs.io.coil.kt.coil.compose)
+    implementation(libs.io.coil.kt.coil3.coil.compose)
 
     implementation(libs.kotlinx.coroutines.core)
 
-    implementation(libs.me.zhanghai.android.appiconloader.coil)
-
-    implementation(libs.sheet.compose.dialogs.core)
-    implementation(libs.sheet.compose.dialogs.list)
-    implementation(libs.sheet.compose.dialogs.input)
+    implementation(libs.okhttp)
 
     implementation(libs.markdown)
-    implementation(libs.com.google.accompanist.webview)
+
+    implementation(libs.ini4j)
+
+    compileOnly(libs.cxx)
 }

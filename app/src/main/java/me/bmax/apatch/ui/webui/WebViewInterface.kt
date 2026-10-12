@@ -2,6 +2,7 @@ package me.bmax.apatch.ui.webui
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
@@ -9,12 +10,16 @@ import android.view.Window
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
-import androidx.core.view.WindowCompat
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.ShellUtils
+import com.topjohnwu.superuser.internal.UiThreadHandler
+import me.bmax.apatch.ui.WebUIActivity
+import me.bmax.apatch.ui.viewmodel.SuperUserViewModel
 import me.bmax.apatch.util.createRootShell
+import me.bmax.apatch.util.withNewRootShell
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
@@ -22,8 +27,7 @@ import java.util.concurrent.CompletableFuture
 class WebViewInterface(val context: Context, private val webView: WebView) {
     @JavascriptInterface
     fun exec(cmd: String): String {
-        val shell = createRootShell()
-        return ShellUtils.fastCmd(shell, cmd)
+        return withNewRootShell { ShellUtils.fastCmd(this, cmd) }
     }
 
     @JavascriptInterface
@@ -50,25 +54,23 @@ class WebViewInterface(val context: Context, private val webView: WebView) {
 
     @JavascriptInterface
     fun exec(
-        cmd: String,
-        options: String?,
-        callbackFunc: String
+        cmd: String, options: String?, callbackFunc: String
     ) {
         val finalCommand = StringBuilder()
         processOptions(finalCommand, options)
         finalCommand.append(cmd)
 
-        val shell = createRootShell()
-        val result = shell.newJob().add(finalCommand.toString()).to(ArrayList(), ArrayList()).exec()
+        val result = withNewRootShell {
+            newJob().add(finalCommand.toString()).to(ArrayList(), ArrayList()).exec()
+        }
         val stdout = result.out.joinToString(separator = "\n")
         val stderr = result.err.joinToString(separator = "\n")
 
-        val jsCode =
-            "javascript: (function() { try { ${callbackFunc}(${result.code}, ${
-                JSONObject.quote(
-                    stdout
-                )
-            }, ${JSONObject.quote(stderr)}); } catch(e) { console.error(e); } })();"
+        val jsCode = "javascript: (function() { try { ${callbackFunc}(${result.code}, ${
+            JSONObject.quote(
+                stdout
+            )
+        }, ${JSONObject.quote(stderr)}); } catch(e) { console.error(e); } })();"
         webView.post {
             webView.loadUrl(jsCode)
         }
@@ -95,30 +97,36 @@ class WebViewInterface(val context: Context, private val webView: WebView) {
         val shell = createRootShell()
 
         val emitData = fun(name: String, data: String) {
-            val jsCode =
-                "javascript: (function() { try { ${callbackFunc}.${name}.emit('data', ${
-                    JSONObject.quote(
-                        data
-                    )
-                }); } catch(e) { console.error('emitData', e); } })();"
+            val jsCode = "javascript: (function() { try { ${callbackFunc}.${name}.emit('data', ${
+                JSONObject.quote(
+                    data
+                )
+            }); } catch(e) { console.error('emitData', e); } })();"
             webView.post {
                 webView.loadUrl(jsCode)
             }
         }
 
-        val stdout = object : CallbackList<String>() {
+        val stdout = object : CallbackList<String>(UiThreadHandler::runAndWait) {
             override fun onAddElement(s: String) {
                 emitData("stdout", s)
             }
         }
 
-        val stderr = object : CallbackList<String>() {
+        val stderr = object : CallbackList<String>(UiThreadHandler::runAndWait) {
             override fun onAddElement(s: String) {
                 emitData("stderr", s)
             }
         }
 
-        val future = shell.newJob().add(finalCommand.toString()).to(stdout, stderr).enqueue()
+        // If enqueue() itself throws synchronously, whenComplete below is never
+        // registered, so close the shell here to avoid leaking it.
+        val future = try {
+            shell.newJob().add(finalCommand.toString()).to(stdout, stderr).enqueue()
+        } catch (t: Throwable) {
+            runCatching { shell.close() }
+            throw t
+        }
         val completableFuture = CompletableFuture.supplyAsync {
             future.get()
         }
@@ -143,6 +151,8 @@ class WebViewInterface(val context: Context, private val webView: WebView) {
                     webView.loadUrl(emitErrCode)
                 }
             }
+        }.whenComplete { _, _ ->
+            runCatching { shell.close() }
         }
     }
 
@@ -164,23 +174,73 @@ class WebViewInterface(val context: Context, private val webView: WebView) {
                 }
             }
         }
+        enableInsets(enable)
     }
 
+    @JavascriptInterface
+    fun enableInsets(enable: Boolean = true) {
+        if (context is WebUIActivity) {
+            context.enableInsets(enable)
+        }
+    }
+
+    @JavascriptInterface
+    fun listPackages(type: String): String {
+        val packageNames = SuperUserViewModel.apps
+            .filter { appInfo ->
+                val flags = appInfo.packageInfo.applicationInfo?.flags ?: 0
+                when (type.lowercase()) {
+                    "system" -> (flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    "user" -> (flags and ApplicationInfo.FLAG_SYSTEM) == 0
+                    else -> true
+                }
+            }
+            .map { it.packageName }
+            .sorted()
+
+        val jsonArray = JSONArray()
+        for (pkgName in packageNames) {
+            jsonArray.put(pkgName)
+        }
+        return jsonArray.toString()
+    }
+
+    @JavascriptInterface
+    fun getPackagesInfo(packageNamesJson: String): String {
+        val packageNames = JSONArray(packageNamesJson)
+        val jsonArray = JSONArray()
+        val appMap = SuperUserViewModel.apps.associateBy { it.packageName }
+        for (i in 0 until packageNames.length()) {
+            val pkgName = packageNames.getString(i)
+            val appInfo = appMap[pkgName]
+            if (appInfo != null) {
+                val pkg = appInfo.packageInfo
+                val app = pkg.applicationInfo
+                val obj = JSONObject()
+                obj.put("packageName", pkg.packageName)
+                obj.put("versionName", pkg.versionName ?: "")
+                obj.put("versionCode", PackageInfoCompat.getLongVersionCode(pkg))
+                obj.put("appLabel", appInfo.label)
+                obj.put("isSystem", if (app != null) ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0) else JSONObject.NULL)
+                obj.put("uid", app?.uid ?: JSONObject.NULL)
+                jsonArray.put(obj)
+            } else {
+                val obj = JSONObject()
+                obj.put("packageName", pkgName)
+                obj.put("error", "Package not found or inaccessible")
+                jsonArray.put(obj)
+            }
+        }
+        return jsonArray.toString()
+    }
 }
 
 fun hideSystemUI(window: Window) {
-    WindowCompat.setDecorFitsSystemWindows(window, false)
     WindowInsetsControllerCompat(window, window.decorView).let { controller ->
         controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 }
 
-fun showSystemUI(window: Window) {
-    WindowCompat.setDecorFitsSystemWindows(window, true)
-    WindowInsetsControllerCompat(
-        window,
-        window.decorView
-    ).show(WindowInsetsCompat.Type.systemBars())
-}
+fun showSystemUI(window: Window) =
+    WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())

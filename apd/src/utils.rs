@@ -1,31 +1,23 @@
-use anyhow::{bail, Context, Error, Ok, Result};
-use std::{
-    fs::{create_dir_all, write, File, OpenOptions},
-    io::{ErrorKind::AlreadyExists, Write},
-    path::Path,
-};
-
 #[allow(unused_imports)]
-use std::fs::{set_permissions, Permissions};
+use std::fs::{Permissions, set_permissions};
 #[cfg(unix)]
 use std::os::unix::prelude::PermissionsExt;
+use std::{
+    ffi::CString,
+    fs::{File, OpenOptions, create_dir_all, metadata},
+    io::{ErrorKind::AlreadyExists, Write},
+    path::Path,
+    process::{Command, Stdio},
+};
 
-use crate::defs;
-use std::fs::metadata;
+use anyhow::{Context, Error, Ok, Result, bail};
+use log::{info, warn};
 
-pub fn ensure_clean_dir(dir: &str) -> Result<()> {
-    let path = Path::new(dir);
-    log::debug!("ensure_clean_dir: {}", path.display());
-    if path.exists() {
-        log::debug!("ensure_clean_dir: {} exists, remove it", path.display());
-        std::fs::remove_dir_all(path)?;
-    }
-    Ok(std::fs::create_dir_all(path)?)
-}
+use crate::{defs, supercall::sc_su_get_safemode};
 
 pub fn ensure_file_exists<T: AsRef<Path>>(file: T) -> Result<()> {
     match File::options().write(true).create_new(true).open(&file) {
-        std::result::Result::Ok(_) => Ok(()),
+        Result::Ok(_) => Ok(()),
         Err(err) => {
             if err.kind() == AlreadyExists && file.as_ref().is_file() {
                 Ok(())
@@ -48,20 +40,8 @@ pub fn ensure_dir_exists<T: AsRef<Path>>(dir: T) -> Result<()> {
     }
 }
 
-pub fn ensure_binary<T: AsRef<Path>>(path: T, contents: &[u8]) -> Result<()> {
-    if path.as_ref().exists() {
-        return Ok(());
-    }
-
-    ensure_dir_exists(path.as_ref().parent().ok_or_else(|| {
-        anyhow::anyhow!(
-            "{} does not have parent directory",
-            path.as_ref().to_string_lossy()
-        )
-    })?)?;
-
-    write(&path, contents)?;
-    #[cfg(unix)]
+// todo: ensure
+pub fn ensure_binary<T: AsRef<Path>>(path: T) -> Result<()> {
     set_permissions(&path, Permissions::from_mode(0o755))?;
     Ok(())
 }
@@ -75,51 +55,57 @@ pub fn getprop(prop: &str) -> Option<String> {
 pub fn getprop(_prop: &str) -> Option<String> {
     unimplemented!()
 }
-
-pub fn is_safe_mode() -> bool {
+pub fn run_command(
+    command: &str,
+    args: &[&str],
+    stdout: Option<Stdio>,
+) -> Result<std::process::Child> {
+    let mut command_builder = Command::new(command);
+    command_builder.args(args);
+    if let Some(out) = stdout {
+        command_builder.stdout(out);
+    }
+    let child = command_builder.spawn()?;
+    Ok(child)
+}
+pub fn is_safe_mode(superkey: Option<String>) -> bool {
     let safemode = getprop("persist.sys.safemode")
         .filter(|prop| prop == "1")
         .is_some()
         || getprop("ro.sys.safemode")
             .filter(|prop| prop == "1")
             .is_some();
-    log::info!("safemode: {}", safemode);
+    info!("safemode: {}", safemode);
     if safemode {
         return true;
     }
-    let safemode = Path::new(defs::SAFEMODE_PATH).exists();
-    log::info!("kernel_safemode: {}", safemode);
+    let safemode = superkey
+        .as_ref()
+        .and_then(|key_str| CString::new(key_str.as_str()).ok())
+        .map_or_else(
+            || {
+                warn!("[is_safe_mode] No valid superkey provided, assuming safemode as false.");
+                false
+            },
+            |cstr| sc_su_get_safemode(&cstr) == 1,
+        );
+    info!("kernel_safemode: {}", safemode);
     safemode
-}
-
-pub fn get_zip_uncompressed_size(zip_path: &str) -> Result<u64> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
-    let total: u64 = (0..zip.len())
-        .map(|i| zip.by_index(i).unwrap().size())
-        .sum();
-    Ok(total)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn switch_mnt_ns(pid: i32) -> Result<()> {
-    use anyhow::ensure;
     use std::os::fd::AsRawFd;
+
+    use anyhow::ensure;
     let path = format!("/proc/{pid}/ns/mnt");
-    let fd = std::fs::File::open(path)?;
+    let fd = File::open(path)?;
     let current_dir = std::env::current_dir();
     let ret = unsafe { libc::setns(fd.as_raw_fd(), libc::CLONE_NEWNS) };
-    if let std::result::Result::Ok(current_dir) = current_dir {
+    if let Result::Ok(current_dir) = current_dir {
         let _ = std::env::set_current_dir(current_dir);
     }
     ensure!(ret == 0, "switch mnt ns failed");
-    Ok(())
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-pub fn unshare_mnt_ns() -> Result<()> {
-    use anyhow::ensure;
-    let ret = unsafe { libc::unshare(libc::CLONE_NEWNS) };
-    ensure!(ret == 0, "unshare mnt ns failed");
     Ok(())
 }
 
@@ -130,8 +116,8 @@ fn switch_cgroup(grp: &str, pid: u32) {
     }
 
     let fp = OpenOptions::new().append(true).open(path);
-    if let std::result::Result::Ok(mut fp) = fp {
-        let _ = writeln!(fp, "{pid}");
+    if let Result::Ok(mut fp) = fp {
+        let _ = write!(fp, "{pid}");
     }
 }
 
@@ -147,6 +133,61 @@ pub fn switch_cgroups() {
     {
         switch_cgroup("/dev/memcg/apps", pid);
     }
+}
+
+/// Detach the current process into a background daemon so it survives the
+/// framework being torn down around it (e.g. `stop` during a soft reboot).
+/// Redirects stdin/stdout/stderr to /dev/null and double-forks out of the
+/// caller's process group / cgroup.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn daemonize() -> Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        bail!("fork error: {}", std::io::Error::last_os_error());
+    }
+    if pid > 0 {
+        // Parent: wait for the child, then exit so the caller sees success.
+        let mut status: i32 = 0;
+        loop {
+            if unsafe { libc::waitpid(pid, &mut status, 0) } < 0 {
+                if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                    std::process::exit(1);
+                }
+            } else {
+                break;
+            }
+        }
+        std::process::exit(0);
+    }
+
+    unsafe { libc::setsid() };
+    switch_cgroups();
+
+    if let Result::Ok(null) = File::open("/dev/null") {
+        let fd = null.as_raw_fd();
+        unsafe {
+            libc::dup2(fd, 0);
+            libc::dup2(fd, 1);
+            libc::dup2(fd, 2);
+        }
+    }
+
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        bail!("fork error: {}", std::io::Error::last_os_error());
+    }
+    if pid > 0 {
+        unsafe { libc::_exit(0) };
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn daemonize() -> Result<()> {
+    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]

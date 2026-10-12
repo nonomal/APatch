@@ -1,20 +1,40 @@
 package me.bmax.apatch.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -23,25 +43,26 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.ramcosta.composedestinations.annotation.Destination
-import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import kotlinx.coroutines.Dispatchers
+import com.ramcosta.composedestinations.annotation.RootGraph
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import me.bmax.apatch.Natives
 import me.bmax.apatch.R
+import me.bmax.apatch.ui.component.ProvideMenuShape
 import me.bmax.apatch.ui.component.SearchAppBar
+import me.bmax.apatch.ui.component.SwitchItem
+import me.bmax.apatch.ui.component.pinnedScrollBehavior
 import me.bmax.apatch.ui.viewmodel.SuperUserViewModel
-import me.bmax.apatch.util.PkgConfig
 
 
-@OptIn(ExperimentalMaterialApi::class)
-@Destination
+@OptIn(ExperimentalMaterial3Api::class)
+@Destination<RootGraph>
 @Composable
-fun SuperUserScreen(navigator: DestinationsNavigator) {
+fun SuperUserScreen() {
     val viewModel = viewModel<SuperUserViewModel>()
+    val scrollBehavior = pinnedScrollBehavior()
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -53,10 +74,9 @@ fun SuperUserScreen(navigator: DestinationsNavigator) {
     Scaffold(
         topBar = {
             SearchAppBar(
-                title = { Text(stringResource(R.string.su_title)) },
                 searchText = viewModel.search,
                 onSearchTextChange = { viewModel.search = it },
-                onClearClick = { viewModel.search = "" },
+                searchBarPlaceHolderText = stringResource(R.string.search_apps),
                 dropdownContent = {
                     var showDropdown by remember { mutableStateOf(false) }
 
@@ -68,59 +88,49 @@ fun SuperUserScreen(navigator: DestinationsNavigator) {
                             contentDescription = stringResource(id = R.string.settings)
                         )
 
-                        DropdownMenu(expanded = showDropdown, onDismissRequest = {
-                            showDropdown = false
-                        }) {
-                            DropdownMenuItem(text = {
-                                Text(stringResource(R.string.su_refresh))
-                            }, onClick = {
-                                scope.launch {
-                                    viewModel.fetchAppList()
-                                }
+                        ProvideMenuShape(RoundedCornerShape(10.dp)) {
+                            DropdownMenu(expanded = showDropdown, onDismissRequest = {
                                 showDropdown = false
-                            })
-
-                            DropdownMenuItem(text = {
-                                Text(
-                                    if (viewModel.showSystemApps) {
-                                        stringResource(R.string.su_hide_system_apps)
-                                    } else {
-                                        stringResource(R.string.su_show_system_apps)
+                            }) {
+                                DropdownMenuItem(text = {
+                                    Text(stringResource(R.string.su_refresh))
+                                }, onClick = {
+                                    scope.launch {
+                                        viewModel.fetchAppList()
                                     }
-                                )
-                            }, onClick = {
-                                viewModel.showSystemApps = !viewModel.showSystemApps
-                                showDropdown = false
-                            })
+                                    showDropdown = false
+                                })
+
+                                DropdownMenuItem(text = {
+                                    Text(
+                                        if (viewModel.showSystemApps) {
+                                            stringResource(R.string.su_hide_system_apps)
+                                        } else {
+                                            stringResource(R.string.su_show_system_apps)
+                                        }
+                                    )
+                                }, onClick = {
+                                    viewModel.showSystemApps = !viewModel.showSystemApps
+                                    showDropdown = false
+                                })
+                            }
                         }
                     }
-                },
+                }
             )
         },
-        floatingActionButton = {
-        }
     ) { innerPadding ->
 
-        val refreshState = rememberPullRefreshState(
-            refreshing = viewModel.isRefreshing,
+        PullToRefreshBox(
+            modifier = Modifier.padding(innerPadding),
             onRefresh = { scope.launch { viewModel.fetchAppList() } },
-        )
-
-        Box(
-            modifier = Modifier
-                .padding(innerPadding)
-                .pullRefresh(refreshState)
+            isRefreshing = viewModel.isRefreshing
         ) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(viewModel.appList, key = { it.packageName + it.uid }) { app ->
-                    AppItem(app)
+                    AppItem(app, viewModel)
                 }
             }
-            PullRefreshIndicator(
-                refreshing = viewModel.isRefreshing,
-                state = refreshState,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
         }
     }
 }
@@ -129,22 +139,25 @@ fun SuperUserScreen(navigator: DestinationsNavigator) {
 @Composable
 private fun AppItem(
     app: SuperUserViewModel.AppInfo,
+    viewModel: SuperUserViewModel,
 ) {
     val config = app.config
-    var edit by remember { mutableStateOf(false) }
-    var checked by remember { mutableStateOf(config.allow != 0) }
+    var showEditProfile by remember { mutableStateOf(false) }
+    val rootGranted = config.allow != 0
+    val excluded = config.exclude == 1
 
     ListItem(
         modifier = Modifier.clickable(onClick = {
-            edit = !edit
+            // Tapping the row only toggles the profile editor; granting or
+            // revoking root goes through the Switch alone so a stray tap can
+            // never strip an app's root access.
+            showEditProfile = !showEditProfile
         }),
         headlineContent = { Text(app.label) },
         leadingContent = {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(app.packageInfo)
-                    .crossfade(true)
-                    .build(),
+                model = ImageRequest.Builder(LocalContext.current).data(app.packageInfo)
+                    .crossfade(true).build(),
                 contentDescription = app.label,
                 modifier = Modifier
                     .padding(4.dp)
@@ -153,88 +166,52 @@ private fun AppItem(
             )
         },
         supportingContent = {
+
             Column {
                 Text(app.packageName)
                 FlowRow {
-//                    if (config.exclude != 0) {
-//                        LabelText(label = stringResource(id = R.string.su_pkg_excluded_label))
-//                    }
-                    if (config.allow != 0) {
+
+                    if (excluded) {
+                        LabelText(label = stringResource(id = R.string.su_pkg_excluded_label))
+                    }
+                    if (rootGranted) {
                         LabelText(label = config.profile.uid.toString())
                         LabelText(label = config.profile.toUid.toString())
-                        LabelText(label = when {
-                            // todo: valid scontext ?
-                            config.profile.scontext.isNotEmpty() -> config.profile.scontext
-                            else -> stringResource(id = R.string.su_selinux_via_hook)
-                        })
+                        LabelText(
+                            label = when {
+                                // todo: valid scontext ?
+                                config.profile.scontext.isNotEmpty() -> config.profile.scontext
+                                else -> stringResource(id = R.string.su_selinux_via_hook)
+                            }
+                        )
                     }
                 }
             }
         },
         trailingContent = {
-            Switch(checked = checked
-                , onCheckedChange = {
-                    checked = !checked
-                    config.allow = if (checked) 1 else 0
-                    if (checked) {
-                        Natives.grantSu(app.uid, 0, config.profile.scontext)
-                    } else {
-                        Natives.revokeSu(app.uid)
-                    }
-                    runBlocking {
-                        launch(Dispatchers.IO) {
-                            PkgConfig.changeConfig(config)
-                        }
-                    }
-                })
+            Switch(checked = rootGranted, onCheckedChange = {
+                viewModel.setRootGranted(app, it)
+            })
         },
     )
-    if (edit) {
-        EditUser(app)
+
+    AnimatedVisibility(
+        visible = showEditProfile && !rootGranted,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        SwitchItem(
+            icon = Icons.Filled.Security,
+            title = stringResource(id = R.string.su_pkg_excluded_setting_title),
+            summary = stringResource(id = R.string.su_pkg_excluded_setting_summary),
+            checked = excluded,
+            onCheckedChange = {
+                viewModel.setExcluded(app, it)
+            },
+        )
     }
 }
-
-@Composable
-fun EditUser(app: SuperUserViewModel.AppInfo) {
-//    var _viahook = app.config.profile?.scontext.isNullOrEmpty()
-//    var viahook by remember { mutableStateOf(_viahook) }
-//    var exclude by remember { mutableStateOf(app.config.exclude) }
-
-    Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp)) {
-//        SwitchItem(
-//            icon = Icons.Filled.Security,
-//            title = "SU Thread",
-//            summary = "bypass selinux via hooks",
-//            checked = viahook,
-//            onCheckedChange = {
-//                viahook = !viahook
-//                if (viahook) app.config.profile.scontext = ""
-//                else app.config.profile.scontext = APApplication.MAGISK_SCONTEXT
-//                runBlocking {
-//                    launch(Dispatchers.IO) {
-//                        PkgConfig.changeConfig(app.config)
-//                    }
-//                }
-//            },
-//        )
-//        SwitchItem(
-//            icon = Icons.Filled.Security,
-//            title = stringResource(id = R.string.su_pkg_excluded_setting_title),
-//            summary = stringResource(id = R.string.su_pkg_excluded_setting_summary),
-//            checked = exclude != 0,
-//            onCheckedChange = {
-//                exclude = if (it) 1 else 0
-//                runBlocking {
-//                    launch(Dispatchers.IO) {
-//                        app.config.exclude = exclude
-//                        PkgConfig.changeConfig(app.config)
-//                    }
-//                }
-//            },
-//        )
-    }
-}
-
 
 @Composable
 fun LabelText(label: String) {
@@ -242,8 +219,7 @@ fun LabelText(label: String) {
         modifier = Modifier
             .padding(top = 4.dp, end = 4.dp)
             .background(
-                Color.Black,
-                shape = RoundedCornerShape(4.dp)
+                Color.Black, shape = RoundedCornerShape(4.dp)
             )
     ) {
         Text(
